@@ -20,10 +20,18 @@ Singleton {
         var n = themeNames()
         return (n.length === 0 || n.indexOf(wantedTheme) >= 0) ? wantedTheme : n[0]
     }
+    // Saved widget position {x, y} (window margins); null = centred. Cleared by "Reset position".
+    readonly property var pos: state.pos || null
+    // Stacking: "above" other windows (default) or "below" them (above the wallpaper only)
+    property string pin: state.pin || cfg.pin || "above"
     property bool muted: state.muted !== undefined ? state.muted : (cfg.muted || false)
     property real scale: cfg.scale || 2
     property string location: cfg.location || ""            // weather default; empty = geo-IP
     property string terminalPolicy: cfg.terminal || "confirm" // "confirm" | "allow" | "deny"
+    // "auto": desktop apps and safe files open directly, anything else asks first; "confirm": always ask; "allow": never ask
+    property string launchPolicy: cfg.launch || "auto"
+    property string units: cfg.units || (Qt.locale().measurementSystem === Locale.MetricSystem ? "metric" : "imperial")
+    property bool useRouter: cfg.router !== false      // answer common requests without the model (best for small models)
     property bool greet: cfg.greeting !== false
     property var tts: cfg.tts || ({})
     property string userName: cfg.userName || ""
@@ -46,7 +54,9 @@ Singleton {
     }
 
     function save(key, value) {
-        var s = Object.assign({}, state); s[key] = value; state = s
+        var s = Object.assign({}, state)
+        if (value === null || value === undefined) delete s[key]; else s[key] = value
+        state = s
         stateFile.setText(JSON.stringify(s, null, 2))
     }
 

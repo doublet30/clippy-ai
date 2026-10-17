@@ -49,12 +49,25 @@ public:
     }
 
     void saveNow() { save(); }
+    // Clear the saved widget position so Clippy re-centres itself (state.json is shared with the right-click menu).
+    bool resetPosition() {
+        QString statePath = QFileInfo(path).absolutePath() + "/state.json";
+        QFile sf(statePath);
+        QJsonObject st;
+        if (sf.open(QIODevice::ReadOnly)) { st = QJsonDocument::fromJson(sf.readAll()).object(); sf.close(); }
+        st.remove("pos");
+        QDir().mkpath(QFileInfo(statePath).absolutePath());
+        QSaveFile so(statePath);
+        if (!so.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+        so.write(QJsonDocument(st).toJson());
+        return so.commit();
+    }
 
 private:
     QJsonObject root;
     QString path = QDir::homePath() + "/.config/clippy-ai/config.json";
     QLabel *pathLabel;
-    QComboBox *active, *terminal, *theme;
+    QComboBox *active, *terminal, *theme, *pin, *launch;
     QStackedWidget *stack;
     QListWidget *list;
     QList<ProviderPage> pages;
@@ -128,6 +141,13 @@ private:
         terminal->addItem("Ask me before every command", "confirm");
         terminal->addItem("Allow without asking (dangerous)", "allow");
         terminal->addItem("Disable terminal access", "deny");
+        pin = new QComboBox;
+        pin->addItem("Above other windows", "above");
+        pin->addItem("Below other windows (above the wallpaper)", "below");
+        launch = new QComboBox;
+        launch->addItem("Open known apps/files directly, ask for anything else", "auto");
+        launch->addItem("Always ask before launching or opening", "confirm");
+        launch->addItem("Never ask (dangerous)", "allow");
         location = new QLineEdit; location->setPlaceholderText("City for weather (empty = auto-detect)");
         userName = new QLineEdit;
         greeting = new QCheckBox("Say hello on startup");
@@ -135,8 +155,14 @@ private:
         voice = new QLineEdit; voice->setPlaceholderText("espeak-ng voice, e.g. en-us");
         rate = new QSpinBox; rate->setRange(80, 400);
         pitch = new QSpinBox; pitch->setRange(0, 99);
+        auto *resetPos = new QPushButton("Reset widget position (re-centre)");
+        connect(resetPos, &QPushButton::clicked, this, [this] {
+            statusBar()->showMessage(resetPosition() ? "Position reset - Clippy re-centres immediately (or on next start)." : "Could not write state.json", 6000);
+        });
         f->addRow("Character:", theme);
         f->addRow("Size multiplier:", scale);
+        f->addRow("Stacking:", pin);
+        f->addRow("Launching apps/files:", launch);
         f->addRow("Terminal access:", terminal);
         f->addRow("Default location:", location);
         f->addRow("Your name:", userName);
@@ -145,6 +171,7 @@ private:
         f->addRow("Voice:", voice);
         f->addRow("Speech rate (wpm):", rate);
         f->addRow("Pitch:", pitch);
+        f->addRow("Widget position:", resetPos);
         return w;
     }
 
@@ -170,6 +197,8 @@ private:
         }
         theme->setCurrentText(str(root["theme"], "tux"));
         scale->setValue(root["scale"].toDouble(2));
+        int pi = pin->findData(str(root["pin"], "above")); pin->setCurrentIndex(pi < 0 ? 0 : pi);
+        int li = launch->findData(str(root["launch"], "auto")); launch->setCurrentIndex(li < 0 ? 0 : li);
         int ti = terminal->findData(str(root["terminal"], "confirm")); terminal->setCurrentIndex(ti < 0 ? 0 : ti);
         location->setText(str(root["location"]));
         userName->setText(str(root["userName"]));
@@ -197,6 +226,8 @@ private:
         o["theme"] = theme->currentText().trimmed();
         o["scale"] = scale->value();
         o["terminal"] = terminal->currentData().toString();
+        o["pin"] = pin->currentData().toString();
+        o["launch"] = launch->currentData().toString();
         o["location"] = location->text().trimmed();
         o["userName"] = userName->text().trimmed();
         o["greeting"] = greeting->isChecked();
@@ -219,8 +250,8 @@ private:
         QFile sf(statePath);
         if (sf.open(QIODevice::ReadOnly)) {
             QJsonObject st = QJsonDocument::fromJson(sf.readAll()).object(); sf.close();
-            if (st.contains("provider") || st.contains("theme")) {
-                st.remove("provider"); st.remove("theme");
+            if (st.contains("provider") || st.contains("theme") || st.contains("pin")) {
+                st.remove("provider"); st.remove("theme"); st.remove("pin");
                 QSaveFile so(statePath);
                 if (so.open(QIODevice::WriteOnly | QIODevice::Truncate)) { so.write(QJsonDocument(st).toJson()); so.commit(); }
             }
@@ -315,6 +346,7 @@ int main(int argc, char **argv) {
     QApplication app(argc, argv);
     app.setApplicationName("clippy-ai-config");
     ConfigWindow w;
+    if (app.arguments().contains("--reset-position")) { return w.resetPosition() ? 0 : 1; }   // headless recovery: clippy-ai-config --reset-position
     if (app.arguments().contains("--save-and-quit")) { w.saveNow(); return 0; }  // round-trip test / normalise file
     w.show();
     return app.exec();

@@ -8,6 +8,7 @@ Rectangle {
     property string brain: ""
     property string theme: ""
     property bool muted: false
+    property string pin: "above"
     signal choose(string kind, string value)
 
     visible: false
@@ -67,12 +68,21 @@ Rectangle {
         Rectangle { width: parent.width; height: 1; color: "#bbb" }
         Row {
             spacing: 14
+            Item_ { label: "Keep above windows"; active: root.pin === "above"; onActivated: { root.choose("pin", "above"); root.visible = false } }
+            Item_ { label: "Keep below windows"; active: root.pin === "below"; onActivated: { root.choose("pin", "below"); root.visible = false } }
+        }
+        Row {
+            spacing: 14
             Item_ { label: "Animate!"; onActivated: { root.choose("animate", ""); root.visible = false } }
             Item_ { label: root.muted ? "Unmute" : "Mute"; onActivated: { root.choose("mute", ""); root.visible = false } }
         }
         Row {
             spacing: 14
+            Item_ { label: "Reset position"; onActivated: { root.choose("resetpos", ""); root.visible = false } }
             Item_ { label: "New conversation"; onActivated: { root.choose("reset", ""); root.visible = false } }
+        }
+        Row {
+            spacing: 14
             Item_ { label: "Quit"; onActivated: root.choose("quit", "") }
         }
     }

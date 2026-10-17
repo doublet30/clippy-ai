@@ -19,14 +19,33 @@ ShellRoot {
         implicitHeight: ch
         color: "transparent"
         exclusionMode: ExclusionMode.Ignore
-        WlrLayershell.layer: WlrLayer.Overlay
+        // "Keep below": sit under normal windows (above the wallpaper). The layer is raised while the bubble is
+        // open because only the Top/Overlay layers can take keyboard focus for typing a question.
+        WlrLayershell.layer: (Config.pin === "below" && !assistant.bubbleOpen) ? WlrLayer.Bottom : WlrLayer.Top
         WlrLayershell.namespace: "clippy-ai"
         WlrLayershell.keyboardFocus: assistant.wantsKeyboard ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
-        // Appears centred on screen; dragging moves the margins.
+        // Position: centred by default; dragging moves the margins and the spot is remembered (Config.pos).
+        // The character is always clamped on-screen so it can't be lost; "Reset position" re-centres it.
         anchors { left: true; top: true }
-        property real mx: Math.max(0, ((screen ? screen.width : 1920) - cw) / 2)
-        property real my: Math.max(0, ((screen ? screen.height : 1080) - ch) / 2)
+        property real mx: 0
+        property real my: 0
+        property bool dragging: false
+        readonly property int layerNow: WlrLayershell.layer   // 1=Bottom 2=Top 3=Overlay (for the status IPC)
+        readonly property real sw: screen ? screen.width : 1920
+        readonly property real sh: screen ? screen.height : 1080
+        function clampX(x) { var a = assistant.agentRect; return Math.max(-a.x, Math.min(x, sw - a.x - a.width)) }
+        function clampY(y) { var a = assistant.agentRect; return Math.max(-a.y, Math.min(y, sh - a.y - a.height)) }
+        function place() {
+            var p = Config.pos
+            mx = clampX(p ? p.x : (sw - cw) / 2)
+            my = clampY(p ? p.y : (sh - ch) / 2)
+        }
+        Component.onCompleted: place()
+        onScreenChanged: if (!dragging) place()
+        // The clamp needs the real agent rectangle, which only exists after the first layout pass / theme load.
+        Connections { target: assistant; function onAgentRectChanged() { if (!win.dragging) win.place() } }
+        Connections { target: Config; function onPosChanged() { if (!win.dragging) win.place() } }
         margins { left: Math.round(mx); top: Math.round(my) }
 
         // Only the character, bubble and menu catch the pointer; the rest clicks through.
@@ -40,7 +59,9 @@ ShellRoot {
             id: assistant
             anchors.fill: parent
             readonly property bool wantsKeyboard: true
-            onMoveBy: (dx, dy) => { win.mx += dx; win.my += dy }
+            onMoveBy: (dx, dy) => { win.dragging = true; win.mx = win.clampX(win.mx + dx); win.my = win.clampY(win.my + dy) }
+            onMoveFinished: { win.dragging = false; Config.save("pos", { x: Math.round(win.mx), y: Math.round(win.my) }) }
+            onResetPosition: { win.dragging = false; Config.save("pos", null); win.place() }
             onQuit: Qt.quit()
         }
     }
@@ -51,8 +72,10 @@ ShellRoot {
         function ask(question: string): void { assistant.ask(question) }
         function say(text: string): void { assistant.say(text) }
         function snapshot(path: string): void { assistant.grabToImage(r => r.saveToFile(path)) }   // debug: render to PNG
-        function status(): void { console.log("STATUS " + assistant.statusText) }
+        function status(): void { console.log("STATUS " + assistant.statusText + " pos=" + Math.round(win.mx) + "," + Math.round(win.my) + " layer=" + win.layerNow + " screen=" + win.sw + "x" + win.sh) }
         function select(kind: string, value: string): void { assistant.applyChoice(kind, value) }   // same as the right-click menu
+        function desktop(): void { console.log("DESKTOP available=" + Desktop.available + " backend=" + Desktop.backend + " tools=" + Desktop.toolNames.join(",")) }
+        function resetpos(): void { assistant.resetPosition() }
         function toggle(): void { win.visible = !win.visible }
         function tool(name: string, argsJson: string): void {
             Tools.run(name, JSON.parse(argsJson || "{}"), r => { console.log("TOOL[" + name + "] -> " + r); assistant.say(r.slice(0, 400)) })

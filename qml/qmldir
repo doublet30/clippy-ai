@@ -1,5 +1,7 @@
 singleton Sys 1.0 Sys.qml
 singleton Config 1.0 Config.qml
+singleton Apps 1.0 Apps.qml
+singleton Desktop 1.0 Desktop.qml
 singleton Tools 1.0 Tools.qml
 singleton Speech 1.0 Speech.qml
 Brain 1.0 Brain.qml

@@ -8,6 +8,9 @@ Item {
 
     signal quit()
     signal moveBy(real dx, real dy)
+    signal moveFinished()
+    signal resetPosition()
+    readonly property bool bubbleOpen: bubble.isOpen
 
     // hit-test rectangles (for the host's input mask)
     readonly property rect agentRect: Qt.rect(agent.x, agent.y, agent.width, agent.height)
@@ -86,6 +89,7 @@ Item {
         brain: Config.provider
         theme: Config.theme
         muted: Config.muted
+        pin: Config.pin
         onChoose: (kind, v) => root.applyChoice(kind, v)
     }
 
@@ -95,6 +99,8 @@ Item {
             Config.save("provider", v)
             _present("Now using " + brain.providerLabel + ".", false)
         } else if (kind === "theme") Config.save("theme", v)
+        else if (kind === "pin") Config.save("pin", v)
+        else if (kind === "resetpos") root.resetPosition()
         else if (kind === "mute") { Config.save("muted", !Config.muted); if (Config.muted) Speech.stop() }
         else if (kind === "reset") { brain.reset(); _dismiss() }
         else if (kind === "animate") {
@@ -119,7 +125,7 @@ Item {
             root.moveBy(m.x - px, m.y - py)
         }
         onReleased: m => {
-            if (dragged) return
+            if (dragged) { root.moveFinished(); return }
             if (m.button === Qt.RightButton) menu.openAt(agent.x + m.x, agent.y + m.y, root.width, root.height)
             else if (bubble.mode === "input") root._dismiss()
             else { menu.visible = false; root._openAsk() }

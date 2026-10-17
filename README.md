@@ -12,6 +12,18 @@ The default character is **Tux**; pick another from the right-click menu.
 Requires: Quickshell ≥ 0.3 (Wayland layer-shell), Qt 6 with QtMultimedia, `espeak-ng` (voice; any
 command works via `tts.command`). Click Clippy to ask, drag to move, right-click for brain/character menu.
 
+
+## Using it
+- **Move it anywhere** by dragging; the spot is remembered. Right-click -> *Reset position* (or **Reset widget position** in `clippy-ai-config`,
+  or `clippy-ai-config --reset-position` from a terminal) re-centres it. It can't be dragged off-screen.
+- **Above / below other windows**: right-click -> *Keep above windows* / *Keep below windows*. In "below" mode it rises just while you type a question.
+- **What it can do** (works well even with tiny local models, thanks to a built-in intent router): weather for your current location or any city,
+  the time, *find files* in your home folder, *open files* in their default app or a named one ("open my budget spreadsheet with libreoffice"),
+  *launch programs* ("open firefox"), web search, and terminal commands (asks first).
+- **Voice**: natural Piper voice when installed - see [`docs/VOICES.md`](docs/VOICES.md).
+- **Compositor / app control** (RevolutionWM) is designed in [`docs/COMPOSITOR_API.md`](docs/COMPOSITOR_API.md); `qml/Desktop.qml` already speaks the protocol
+  and `tests/mock_wm.py` is a reference server.
+
 ## Backends (right-click → Brain, or `provider` in config)
 ChatGPT/OpenAI, Claude, Gemini, Grok, Meta Llama (Llama API), and **local** models via any
 OpenAI-compatible server (Ollama default `localhost:11434`, llama.cpp, LM Studio). `auto` picks the
