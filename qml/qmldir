@@ -1,0 +1,11 @@
+singleton Sys 1.0 Sys.qml
+singleton Config 1.0 Config.qml
+singleton Tools 1.0 Tools.qml
+singleton Speech 1.0 Speech.qml
+Brain 1.0 Brain.qml
+CharSprite 1.0 CharSprite.qml
+SoundBank 1.0 SoundBank.qml
+Agent 1.0 Agent.qml
+Bubble 1.0 Bubble.qml
+ContextMenu 1.0 ContextMenu.qml
+Assistant 1.0 Assistant.qml
