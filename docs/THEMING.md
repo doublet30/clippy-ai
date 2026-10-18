@@ -18,6 +18,29 @@ The assistant looks for animations by name and degrades gracefully if missing:
 `Show Greeting GetAttention Thinking Processing Searching CheckingSomething Writing GetTechy
 Explain GestureLeft/Right/Up/Down Alert Congratulate RestPose Idle* Look*`.
 
+## Renderer plug-ins
+
+Most themes are sprite themes and need `map.png` plus frame data as described
+above. A renderer plug-in explicitly declares its type in `agent.json` and is
+selected through the same theme/agent setting without being sent through the
+sprite renderer. The built-in Circle AI manifest is an example:
+
+```json
+{
+  "name": "Circle AI",
+  "renderer": "circle-ai",
+  "appearanceEffects": ["fade"],
+  "animations": { "Show": {}, "Processing": {}, "Speaking": {}, "Idle": {} }
+}
+```
+
+Circle AI begins hidden, randomly chooses an entry from `appearanceEffects`
+when work arrives (currently only `fade`), shows a complete circle first, and
+animates only while processing or presenting/speaking. It settles to the full
+circle after the response, then fades out after 20 seconds. The separate
+renderer contract prevents Canvas plug-ins from being interpreted as sprite
+sheet themes.
+
 ## High-resolution (vector) themes
 Add `"sheetScale": 2` to agent.json when the sheet was drawn at 2 sheet-pixels per logical pixel
 (`framesize` stays in logical px). The sprite is then drawn smoothed instead of pixel-sharp.

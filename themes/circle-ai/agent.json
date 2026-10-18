@@ -1,0 +1,25 @@
+{
+  "name": "Circle AI",
+  "renderer": "circle-ai",
+  "framesize": [120, 120],
+  "appearanceEffects": ["fade"],
+  "animations": {
+    "Show": {},
+    "Hide": {},
+    "Idle": {},
+    "RestPose": {},
+    "Processing": {},
+    "Thinking": {},
+    "Searching": {},
+    "CheckingSomething": {},
+    "Writing": {},
+    "Speaking": {},
+    "Explain": {},
+    "GestureLeft": {},
+    "GestureRight": {},
+    "GestureUp": {},
+    "GestureDown": {},
+    "Alert": {},
+    "GetAttention": {}
+  }
+}

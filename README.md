@@ -43,6 +43,8 @@ compositor/app control, alarms, mail, calendar and phone dialing plug in.
 - `shell.qml` – the only Quickshell-window-specific file (transparent centered layer-shell window, click-through mask, IPC).
 - `qml/Assistant.qml` – drop this into any other Quickshell config as a widget.
 - `qml/CharSprite.qml`, `Agent.qml` – ports of clippy.js Animator/Agent/Queue (branching, exit branching, idle, loops).
+- `qml/VisualAgent.qml` – renderer-aware adapter. Sprite themes use `Agent.qml`; Circle AI uses its Canvas renderer without entering the sprite path.
+- `qml/appearances/CircleAiAnimation.qml` – Circle AI renderer. It appears with a plug-in fade, animates only while processing/speaking, settles to a full ring, and hides after 20 seconds idle.
 - `qml/Bubble.qml` – pop → search bar → thinking dots → answer → confirm.
 - `qml/Brain.qml` + `qml/js/providers.js` – backend-agnostic tool-calling loop.
 - `qml/Tools.qml`, `Speech.qml`, `Sys.qml` – tools, TTS, process layer.
@@ -50,6 +52,16 @@ compositor/app control, alarms, mail, calendar and phone dialing plug in.
 - `tools/mascots/build.py` – generates mascot themes from SVG/PNG art (Tux is rigged: wings, eyes, blink, beak).
 
 Config reference: `examples/config.json`. Themes: `docs/THEMING.md`.
+
+### Circle AI renderer
+
+`circle-ai` is a built-in Revvy appearance, selectable exactly like a normal
+agent: `revvy-ai --agent circle-ai --prompt "Hello"`, or set
+`"theme": "circle-ai"` in `~/.config/revvy-ai/config.json`. It uses the
+manifest renderer type rather than a sprite sheet, so classic agent themes and
+their animations remain fully compatible. The initial appearance plug-in set
+contains `fade`; future transitions can be declared in its manifest without
+changing the request lifecycle.
 
 ## Configuration utility (C++/Qt)
 ```bash

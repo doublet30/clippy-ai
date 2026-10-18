@@ -8,6 +8,8 @@ Brain 1.0 Brain.qml
 CharSprite 1.0 CharSprite.qml
 SoundBank 1.0 SoundBank.qml
 Agent 1.0 Agent.qml
+VisualAgent 1.0 VisualAgent.qml
+CircleAiAnimation 1.0 appearances/CircleAiAnimation.qml
 Bubble 1.0 Bubble.qml
 ContextMenu 1.0 ContextMenu.qml
 Assistant 1.0 Assistant.qml

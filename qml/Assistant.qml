@@ -15,8 +15,12 @@ Item {
     // layer. Only a live text prompt needs a keyboard-focusable surface.
     readonly property bool inputActive: bubble.mode === "input"
 
-    // hit-test rectangles (for the host's input mask)
-    readonly property rect agentRect: Qt.rect(agent.x, agent.y, agent.width, agent.height)
+    // hit-test rectangles (for the host's input mask). VisualAgent normalizes
+    // sprite and Canvas renderer geometry, and a hidden Circle deliberately
+    // has no input region so the desktop remains fully click-through.
+    readonly property rect agentRect: visual.displayed
+        ? Qt.rect(visual.x, visual.y, visual.width, visual.height)
+        : Qt.rect(0, 0, 0, 0)
     readonly property rect bubbleRect: bubble.isOpen
         ? Qt.rect(bubble.x + (bubble.width - bubble.bodyW) / 2, bubble.y + bubble.height - bubble.bodyH - bubble.tailH, bubble.bodyW, bubble.bodyH + bubble.tailH)
         : Qt.rect(0, 0, 0, 0)
@@ -65,8 +69,8 @@ Item {
         }
     }
     function playAnimation(name) {
-        if (name.length > 0 && agent.has(name))
-            agent.play(name)
+        if (name.length > 0 && visual.has(name))
+            visual.play(name)
     }
 
     // ---------- pieces ----------
@@ -74,25 +78,30 @@ Item {
         id: brain
         onToolStarted: name => {
             var t = Tools.get(name)
-            agent.loop(t && t.anim && agent.has(t.anim) ? [t.anim] : root.thinkAnims)
+            visual.loop(t && t.anim && visual.has(t.anim) ? [t.anim] : root.thinkAnims)
         }
         onConfirmRequested: (desc, decide) => {
             root._decide = decide
             bubble.fullText = desc; bubble.shownText = desc; bubble.mode = "confirm"
-            agent.endLoop(); agent.playFirst(["Alert", "GetAttention"])
+            visual.endLoop(); visual.playFirst(["Alert", "GetAttention"])
         }
         onAnswered: text => root._present(text, true)
-        onFailed: msg => { agent.endLoop(); agent.playFirst(["Alert"]); root._present(msg, false) }
+        onFailed: msg => { visual.endLoop(); visual.playFirst(["Alert"]); root._present(msg, false) }
     }
 
-    Agent {
-        id: agent
+    VisualAgent {
+        id: visual
         dir: Config.themeDir(Config.theme)
         pxScale: Config.scale
         x: (root.width - width) / 2
         y: (root.height - height) / 2
         onSound: n => bank.play(n)
         onLoaded: {
+            // Circle AI begins hidden and appears only in response to a
+            // command/request.  Keep the traditional greeting exclusively
+            // for sprite agents so its idle behaviour remains intentional.
+            if (isCircle)
+                return
             if (!root.greeted) {
                 root.greeted = true
                 playFirst(["Show", "Greeting"])
@@ -102,19 +111,19 @@ Item {
         }
     }
 
-    SoundBank { id: bank; dir: agent.dir; names: agent.soundNames; muted: Config.muted }
+    SoundBank { id: bank; dir: visual.dir; names: visual.soundNames; muted: Config.muted }
 
     Bubble {
         id: bubble
-        anchors.horizontalCenter: agent.horizontalCenter
-        y: agent.y - height + 26
+        anchors.horizontalCenter: visual.horizontalCenter
+        y: visual.y - height + 26
         hint: brain.providerLabel + "  ·  Enter to ask  ·  Esc to close"
         onSubmitted: t => { clearInput(); root._submit(t) }
         onDismissed: root._dismiss()
         onClicked: root._openAsk()
         onConfirmed: ok => {
             var d = root._decide; root._decide = null
-            bubble.mode = "thinking"; agent.loop(root.thinkAnims)
+            bubble.mode = "thinking"; visual.loop(root.thinkAnims)
             if (d) d(ok)
         }
     }
@@ -143,15 +152,16 @@ Item {
         else if (kind === "mute") { Config.save("muted", !Config.muted); if (Config.muted) Speech.stop() }
         else if (kind === "reset") { brain.reset(); _dismiss() }
         else if (kind === "animate") {
-            var pool = agent.sprite.names().filter(n => !/^(Idle|Look|RestPose|Hide|Show)/.test(n))
-            if (pool.length) agent.play(pool[Math.floor(Math.random() * pool.length)])
+            var pool = visual.randomAnimationNames()
+            if (pool.length) visual.play(pool[Math.floor(Math.random() * pool.length)])
         } else if (kind === "quit") root.quit()
     }
-    readonly property string statusText: "provider=" + Config.provider + " (" + brain.providerLabel + ") theme=" + Config.theme
+    readonly property string statusText: "provider=" + Config.provider + " (" + brain.providerLabel + ") theme=" + Config.theme + " renderer=" + visual.rendererType
 
     // ---------- interaction ----------
     MouseArea {
-        x: agent.x; y: agent.y; width: agent.width; height: agent.height
+        x: visual.x; y: visual.y; width: visual.width; height: visual.height
+        visible: visual.displayed
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         property real px: 0
         property real py: 0
@@ -165,7 +175,7 @@ Item {
         }
         onReleased: m => {
             if (dragged) { root.moveFinished(); return }
-            if (m.button === Qt.RightButton) menu.openAt(agent.x + m.x, agent.y + m.y, root.width, root.height)
+            if (m.button === Qt.RightButton) menu.openAt(visual.x + m.x, visual.y + m.y, root.width, root.height)
             else if (bubble.mode === "input") root._dismiss()
             else { menu.visible = false; root._openAsk() }
         }
@@ -174,16 +184,20 @@ Item {
     // ---------- conversation flow ----------
     function _openAsk() {
         Speech.stop(); revealTimer.stop(); autoClose.stop()
-        agent.endLoop()
-        agent.playFirst(["GetAttention", "Wave", "LookUp"])
+        visual.endLoop()
+        visual.playFirst(["GetAttention", "Wave", "LookUp"])
         bubble.mode = "input"
     }
 
-    function _dismiss() {
+    function _dismiss(preserveCircleTimeout) {
         Speech.stop(); revealTimer.stop(); autoClose.stop()
         replying = false
         bubble.mode = "closed"
-        agent.endLoop()
+        // The Circle renderer starts its own 20-second hide countdown when a
+        // response settles.  Do not restart it merely because the matching
+        // response bubble closes at the same moment.
+        if (!visual.isCircle || !preserveCircleTimeout)
+            visual.endLoop()
     }
 
     // Called by the compositor-side outside-click bridge. Keep this public
@@ -198,14 +212,22 @@ Item {
         if (brain.busy) return
         Speech.stop(); revealTimer.stop(); autoClose.stop()
         bubble.mode = "thinking"
-        agent.endLoop(); agent.loop(thinkAnims)
+        if (visual.isCircle)
+            visual.beginProcessing()
+        else {
+            visual.endLoop()
+            visual.loop(thinkAnims)
+        }
         brain.ask(text)
     }
 
     // Show text in the bubble, paste it in word by word, optionally speak it.
     function _present(text, talk, quiet) {
         Speech.stop(); revealTimer.stop(); autoClose.stop()
-        agent.endLoop()
+        if (visual.isCircle)
+            visual.beginSpeaking()
+        else
+            visual.endLoop()
         words = text.split(/(\s+)/)
         wordIdx = 0
         bubble.fullText = text; bubble.shownText = ""; bubble.mode = "speak"
@@ -215,8 +237,10 @@ Item {
         speechDone = !spoke
         revealTimer.interval = spoke ? Speech.msPerWord / 2 : (talk ? 70 : 45)
         revealTimer.start()
-        if (talk) agent.loop(talkAnims)
-        else if (!quiet) agent.endLoop()
+        if (!visual.isCircle) {
+            if (talk) visual.loop(talkAnims)
+            else if (!quiet) visual.endLoop()
+        }
     }
 
     property var words: []
@@ -240,9 +264,13 @@ Item {
 
     function _finish() {
         replying = false
-        agent.endLoop()
+        visual.settle()
         autoClose.restart()
         _dispatchNextCommand()
     }
-    Timer { id: autoClose; interval: 22000; onTriggered: if (bubble.mode === "speak") root._dismiss() }
+    Timer {
+        id: autoClose
+        interval: visual.isCircle ? 20000 : 22000
+        onTriggered: if (bubble.mode === "speak") root._dismiss(visual.isCircle)
+    }
 }

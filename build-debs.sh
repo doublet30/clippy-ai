@@ -25,6 +25,10 @@ HOMEPAGE=${HOMEPAGE:-https://github.com/doublet30/revvy-ai}
 
 FREE_THEMES=(tux konqi konqi-classic wilber larry)
 NONFREE_THEMES=(bonzi clippy f1 genie genius links merlin peedy rocky rover)
+# Renderer plug-ins belong to the program package rather than an artwork
+# package.  They still use an agent.json manifest so the existing Config and
+# CLI selection paths can discover them alongside sprite themes.
+CORE_THEMES=(circle-ai)
 
 BUILD=$ROOT/build
 DIST=$ROOT/dist
@@ -35,7 +39,7 @@ log() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 log "Checking theme classification"
 for d in themes/*/; do
     t=$(basename "$d")
-    [[ " ${FREE_THEMES[*]} ${NONFREE_THEMES[*]} " == *" $t "* ]] || { echo "ERROR: theme '$t' is in neither FREE_THEMES nor NONFREE_THEMES"; exit 1; }
+    [[ " ${FREE_THEMES[*]} ${NONFREE_THEMES[*]} ${CORE_THEMES[*]} " == *" $t "* ]] || { echo "ERROR: theme '$t' is in neither FREE_THEMES, NONFREE_THEMES nor CORE_THEMES"; exit 1; }
 done
 for t in "${FREE_THEMES[@]}"; do
     [[ -f themes/$t/agent.json ]] || { echo "ERROR: themes/$t/agent.json missing"; exit 1; }
@@ -97,6 +101,10 @@ P=$STAGE/$NAME
 install -d "$P$PREFIX/bin" "$P$PREFIX/themes" "$P/usr/local/bin" "$P/usr/share/applications" \
            "$P/usr/share/icons/hicolor/scalable/apps" "$P/usr/share/doc/$NAME" "$P/usr/share/lintian/overrides" "$P/DEBIAN"
 cp -r shell.qml qml docs examples README.md VERSION "$P$PREFIX/"
+# Circle AI is a QML renderer plug-in, not a bitmap/sprite-art theme. Ship its
+# manifest with the core so it is available immediately after installing
+# revvy-ai, even when optional art theme packages are omitted.
+for t in "${CORE_THEMES[@]}"; do cp -r "themes/$t" "$P$PREFIX/themes/"; done
 [[ -f LICENSE ]] && cp LICENSE "$P$PREFIX/"
 install -m755 "$BUILD/config-tool/revvy-ai-config" "$P$PREFIX/bin/revvy-ai-config"
 strip --strip-unneeded "$P$PREFIX/bin/revvy-ai-config"
