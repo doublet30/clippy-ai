@@ -189,19 +189,51 @@ Item {
     property real phaseB: 0
     property real elapsed: 0
     property real glow: 0.32
+    // Match the defaults from the standalone Circle AI renderer.  Keep these
+    // named rather than baking their values into Canvas math so the appearance
+    // remains easy to tune without changing its state/lifecycle contract.
+    property real speedMultiplier: 7.52
+    property real peakHeightScale: 0.58
+    property real spikeDipScale: 2.10
+    property real spacingRangeScale: 2.69
+    property real phaseSpeedA: 1.0
+    property real phaseSpeedB: 1.0
+    property real targetPhaseSpeedA: 1.0
+    property real targetPhaseSpeedB: 1.0
+    property real driftElapsed: 0.0
+    property real nextDriftAt: 0.85
 
-    // The Canvas is repainted only for active processing/speaking.  Idle and
+    function naturalDrift() {
+        // Each counter-rotating ring gets a separate, slowly varying tempo.
+        // This is the same gentle variation used by the original Circle AI
+        // animation; interpolating toward it prevents jitter.
+        targetPhaseSpeedA = 0.88 + Math.random() * 0.24
+        targetPhaseSpeedB = 0.84 + Math.random() * 0.30
+        nextDriftAt = 0.72 + Math.random() * 0.96
+        driftElapsed = 0.0
+    }
+
+    // The Canvas is repainted only for active processing/speaking. Idle and
     // hidden states have no running timer and consume no background CPU.
     Timer {
-        interval: 33
+        interval: 25
         repeat: true
         running: root.enabledForHost && root.active
         onTriggered: {
-            var speed = root.state === "speaking" ? 1.32 : 1.0
+            var activitySpeed = root.state === "speaking" ? 1.32 : 1.0
             root.elapsed += interval / 1000
-            root.phaseA += 0.047 * speed
-            root.phaseB -= 0.035 * speed
-            root.glow = 0.46 + 0.54 * Math.sin(root.elapsed * (root.state === "speaking" ? 1.85 : 1.25))
+            root.driftElapsed += interval / 1000
+            if (root.driftElapsed >= root.nextDriftAt)
+                root.naturalDrift()
+
+            root.phaseSpeedA += (root.targetPhaseSpeedA - root.phaseSpeedA) * 0.018
+            root.phaseSpeedB += (root.targetPhaseSpeedB - root.phaseSpeedB) * 0.016
+            const frameScale = interval / 16
+            root.phaseA += 0.02375 * frameScale * root.phaseSpeedA
+                         * root.speedMultiplier * activitySpeed
+            root.phaseB -= 0.0175 * frameScale * root.phaseSpeedB
+                         * root.speedMultiplier * activitySpeed
+            root.glow = 0.5 + 0.5 * Math.sin(root.elapsed * 1.35)
             ring.requestPaint()
         }
     }
@@ -212,28 +244,47 @@ Item {
         antialiasing: true
         renderTarget: Canvas.Image
 
-        function noise(value, seed) {
+        function unitNoise(value, seed) {
             const hashed = Math.sin(value * 127.1 + seed * 311.7) * 43758.5453123
             return hashed - Math.floor(hashed)
         }
 
+        function peakSpacingPhase(angle, phase, count, seed) {
+            // Low-frequency integer harmonics stretch and compress the
+            // distance between peaks while keeping the wave closed at 360°.
+            const spacingWarp = (0.78 * Math.sin(5 * angle + seed * 1.31 - phase * 0.09)
+                + 0.46 * Math.sin(9 * angle - seed * 2.17 + phase * 0.06)
+                + 0.22 * Math.sin(17 * angle + seed * 4.09 - phase * 0.035))
+                * root.spacingRangeScale
+            return count * angle + phase + spacingWarp
+        }
+
+        function peakAmplitude(wavePhase, seed) {
+            const fullTurn = 2 * Math.PI
+            const crestIndex = Math.floor((wavePhase + Math.PI / 2) / fullTurn)
+            const troughIndex = Math.floor((wavePhase + 3 * Math.PI / 2) / fullTurn)
+            const crestTip = Math.pow(Math.max(0, Math.sin(wavePhase)), 8)
+            const troughTip = Math.pow(Math.max(0, -Math.sin(wavePhase)), 8)
+            const crestOffset = (unitNoise(crestIndex, seed) - 0.5) * 0.96
+                * root.spikeDipScale
+            const troughOffset = (unitNoise(troughIndex, seed + 9.73) - 0.5) * 0.96
+                * root.spikeDipScale
+            return 1 + crestTip * crestOffset + troughTip * troughOffset
+        }
+
         function path(ctx, cx, cy, radius, amplitude, phase, count, seed) {
-            // Enough detail for a 120–720px-scale widget, without the 600
-            // samples used by the standalone 760px demo.
+            // The widget is physically smaller than the original 760px demo;
+            // 300 samples preserve its curve without wasting paint time.
             const steps = 300
             ctx.beginPath()
             for (let index = 0; index <= steps; ++index) {
                 const angle = index * 2 * Math.PI / steps
-                const wavePhase = count * angle + phase
-                    + 0.42 * Math.sin(3 * angle + seed - phase * 0.08)
-                    + 0.18 * Math.sin(7 * angle - seed + phase * 0.05)
-                const peakIndex = Math.floor((wavePhase + Math.PI / 2) / (2 * Math.PI))
-                const tip = Math.pow(Math.max(0, Math.sin(wavePhase)), 7)
-                const dip = Math.pow(Math.max(0, -Math.sin(wavePhase)), 7)
-                const individual = 1
-                    + (noise(peakIndex, seed) - 0.5) * 0.75 * tip
-                    + (noise(peakIndex, seed + 5.31) - 0.5) * 0.75 * dip
-                const radial = radius + amplitude * Math.sin(wavePhase) * individual
+                const wavePhase = peakSpacingPhase(angle, phase, count, seed)
+                const individual = peakAmplitude(wavePhase, seed)
+                const wobble = Math.sin(wavePhase) * individual
+                    + 0.11 * Math.sin((count + 5) * angle - phase * 0.69 + seed)
+                    + 0.055 * Math.sin((count - 7) * angle + phase * 0.43 + seed * 2)
+                const radial = radius + amplitude * wobble
                 const x = cx + radial * Math.cos(angle)
                 const y = cy + radial * Math.sin(angle)
                 if (index === 0)
@@ -247,14 +298,13 @@ Item {
         function drawWave(ctx, cx, cy, radius, amplitude, phase, count, seed, color, alpha) {
             const rgb = [Math.round(color.r * 255), Math.round(color.g * 255),
                          Math.round(color.b * 255)].join(",")
-            const diameter = Math.min(width, height)
+            const base = Math.max(1.7, radius * 0.007)
             for (let pass = 0; pass < 3; ++pass) {
                 path(ctx, cx, cy, radius, amplitude, phase, count, seed)
-                ctx.lineWidth = pass === 0 ? Math.max(2.4, diameter * 0.078)
-                              : pass === 1 ? Math.max(1.3, diameter * 0.040)
-                              : Math.max(0.7, diameter * 0.017)
+                ctx.lineWidth = pass === 0 ? base * 7
+                              : pass === 1 ? base * 3 : base
                 ctx.strokeStyle = pass === 0 ? "rgba(" + rgb + "," + (0.075 * alpha) + ")"
-                                : pass === 1 ? "rgba(" + rgb + "," + (0.24 * alpha) + ")"
+                                : pass === 1 ? "rgba(" + rgb + "," + (0.20 * alpha) + ")"
                                 : "rgba(" + rgb + "," + (0.98 * alpha) + ")"
                 ctx.stroke()
             }
@@ -282,7 +332,7 @@ Item {
             const diameter = Math.min(width, height)
             const cx = width / 2
             const cy = height / 2
-            const radius = diameter * 0.355
+            const radius = diameter * 0.325
             if (!root.active) {
                 // A calm, complete dual-colour circle is deliberately used
                 // for appearance and idle: animation starts only once work
@@ -291,11 +341,12 @@ Item {
                 drawFlatRing(context, cx, cy, radius - diameter * 0.010, root.secondColor, 0.80)
                 return
             }
-            const amplitude = diameter * (root.state === "speaking" ? 0.082 : 0.072)
-            drawWave(context, cx, cy, radius + diameter * 0.020, amplitude,
-                     root.phaseA, 12, 0.8, root.firstColor, 1)
-            drawWave(context, cx, cy, radius - diameter * 0.020, amplitude * 0.84,
-                     root.phaseB, 15, 1.4, root.secondColor, 1)
+            const amplitude = radius * 0.074 * root.peakHeightScale
+            const separation = radius * 0.012
+            drawWave(context, cx, cy, radius + separation, amplitude,
+                     root.phaseA, 42, 0.8, root.firstColor, 1)
+            drawWave(context, cx, cy, radius - separation, amplitude * 0.88,
+                     root.phaseB, 47, 1.4, root.secondColor, 1)
         }
     }
 
