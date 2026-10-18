@@ -10,6 +10,17 @@ import "qml"
 ShellRoot {
     id: shell
 
+    // RevolutionWM reports pointer presses outside our layer surface through
+    // the existing menu bridge. A serial makes the event reliable even when
+    // the desktop click does not activate a regular Wayland window.
+    property int inputDismissalSerial: 0
+
+    function setInputOpen(open) {
+        revvyInputArmAction.exec(["qdbus", "org.ttos.RevolutionMenu.WaylandBridge",
+                                  "/WaylandBridge", "setRevvyAiInputOpen",
+                                  open ? "true" : "false"])
+    }
+
     PanelWindow {
         id: win
         readonly property int cw: 660
@@ -19,9 +30,11 @@ ShellRoot {
         implicitHeight: ch
         color: "transparent"
         exclusionMode: ExclusionMode.Ignore
-        // "Keep below": sit under normal windows (above the wallpaper). The layer is raised while the bubble is
-        // open because only the Top/Overlay layers can take keyboard focus for typing a question.
-        WlrLayershell.layer: (Config.pin === "below" && !assistant.bubbleOpen) ? WlrLayer.Bottom : WlrLayer.Top
+        // Match the other Revolution widgets: display at the Bottom layer so
+        // normal applications always paint above Revvy. It is promoted only
+        // for the short-lived text-entry state, then immediately returns
+        // below the focused application after submit or focus loss.
+        WlrLayershell.layer: inputActive ? WlrLayer.Top : WlrLayer.Bottom
         WlrLayershell.namespace: "revvy-ai"
         WlrLayershell.keyboardFocus: assistant.wantsKeyboard ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
@@ -32,6 +45,7 @@ ShellRoot {
         property real my: 0
         property bool dragging: false
         readonly property int layerNow: WlrLayershell.layer   // 1=Bottom 2=Top 3=Overlay (for the status IPC)
+        readonly property bool inputActive: assistant.inputActive
         readonly property real sw: screen ? screen.width : 1920
         readonly property real sh: screen ? screen.height : 1080
         function clampX(x) { var a = assistant.agentRect; return Math.max(-a.x, Math.min(x, sw - a.x - a.width)) }
@@ -46,6 +60,7 @@ ShellRoot {
         // The clamp needs the real agent rectangle, which only exists after the first layout pass / theme load.
         Connections { target: assistant; function onAgentRectChanged() { if (!win.dragging) win.place() } }
         Connections { target: Config; function onPosChanged() { if (!win.dragging) win.place() } }
+        onInputActiveChanged: shell.setInputOpen(inputActive)
         margins { left: Math.round(mx); top: Math.round(my) }
 
         // Only the character, bubble and menu catch the pointer; the rest clicks through.
@@ -62,11 +77,52 @@ ShellRoot {
             // This makes a desktop click or another application's activation
             // return focus immediately instead of leaving a hidden widget
             // surface as the active Wayland target.
-            readonly property bool wantsKeyboard: bubbleOpen
+            readonly property bool wantsKeyboard: inputActive
             onMoveBy: (dx, dy) => { win.dragging = true; win.mx = win.clampX(win.mx + dx); win.my = win.clampY(win.my + dy) }
             onMoveFinished: { win.dragging = false; Config.save("pos", { x: Math.round(win.mx), y: Math.round(win.my) }) }
             onResetPosition: { win.dragging = false; Config.save("pos", null); win.place() }
             onQuit: Qt.quit()
+        }
+    }
+
+    Process {
+        id: revvyInputArmAction
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const serial = Number(this.text.trim())
+                if (isFinite(serial))
+                    shell.inputDismissalSerial = serial
+            }
+        }
+    }
+
+    Process {
+        id: revvyInputDismissalReader
+        command: ["qdbus", "org.ttos.RevolutionMenu.WaylandBridge", "/WaylandBridge",
+                  "revvyAiDismissalSerial"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const serial = Number(this.text.trim())
+                if (!isFinite(serial))
+                    return
+                if (serial > shell.inputDismissalSerial && win.inputActive)
+                    assistant.dismissForFocusLoss()
+                if (serial >= shell.inputDismissalSerial)
+                    shell.inputDismissalSerial = serial
+            }
+        }
+    }
+
+    Timer {
+        // A desktop click does not have to change Wayland's active window.
+        // Poll only while text entry is active, mirroring the attached AI
+        // drawer's bounded click-away check in the menu.
+        interval: 75
+        running: win.inputActive
+        repeat: true
+        onTriggered: {
+            if (!revvyInputDismissalReader.running)
+                revvyInputDismissalReader.running = true
         }
     }
 

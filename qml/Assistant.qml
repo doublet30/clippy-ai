@@ -11,6 +11,9 @@ Item {
     signal moveFinished()
     signal resetPosition()
     readonly property bool bubbleOpen: bubble.isOpen
+    // A response bubble is display-only and must stay at the normal widget
+    // layer. Only a live text prompt needs a keyboard-focusable surface.
+    readonly property bool inputActive: bubble.mode === "input"
 
     // hit-test rectangles (for the host's input mask)
     readonly property rect agentRect: Qt.rect(agent.x, agent.y, agent.width, agent.height)
@@ -181,6 +184,14 @@ Item {
         replying = false
         bubble.mode = "closed"
         agent.endLoop()
+    }
+
+    // Called by the compositor-side outside-click bridge. Keep this public
+    // and deliberately narrow: a notification/answer remains visible, but a
+    // text entry immediately gives focus and stacking back to the active app.
+    function dismissForFocusLoss() {
+        if (bubble.mode === "input")
+            _dismiss()
     }
 
     function _submit(text) {
