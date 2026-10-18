@@ -11,6 +11,9 @@ Item {
     property string fullText: ""      // complete message (sizes the bubble)
     property string shownText: ""     // revealed so far ("pasted" in while speaking)
     property string hint: ""
+    // Suppress ordinary conversation visual output without suppressing the
+    // confirmation UI that guards potentially destructive tool actions.
+    property bool muted: false
     property color bg: "#FFFFCC"
     property color fg: "#111111"
     property color border: "#000000"
@@ -18,7 +21,7 @@ Item {
     property int fontSize: 15
     readonly property int maxW: 440
     readonly property int tailH: 16
-    readonly property bool isOpen: mode !== "closed"
+    readonly property bool isOpen: mode !== "closed" && (!muted || mode === "confirm")
 
     signal submitted(string text)
     signal confirmed(bool ok)

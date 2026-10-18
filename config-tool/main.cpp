@@ -73,7 +73,7 @@ private:
     QList<ProviderPage> pages;
     QDoubleSpinBox *scale; QLineEdit *location, *userName;
     QComboBox *voice;
-    QCheckBox *greeting, *ttsOn; QSpinBox *rate, *pitch;
+    QCheckBox *greeting, *hideChatBubble, *ttsOn; QSpinBox *rate, *pitch;
     QNetworkAccessManager nam;
 
     QWidget *buildBrainTab() {
@@ -152,6 +152,8 @@ private:
         location = new QLineEdit; location->setPlaceholderText("City for weather (empty = auto-detect)");
         userName = new QLineEdit;
         greeting = new QCheckBox("Say hello on startup");
+        hideChatBubble = new QCheckBox("Hide chat bubble");
+        hideChatBubble->setToolTip("Keep Revvy's speech and animation, but hide normal prompt, thinking, and answer bubbles. Safety confirmation prompts remain visible.");
         ttsOn = new QCheckBox("Speak answers aloud");
         voice = new QComboBox;
         voice->setToolTip("Choose automatic voice selection, an installed Piper neural voice, or an eSpeak fallback.");
@@ -170,6 +172,7 @@ private:
         f->addRow("Default location:", location);
         f->addRow("Your name:", userName);
         f->addRow(greeting);
+        f->addRow(hideChatBubble);
         f->addRow(ttsOn);
         f->addRow("Voice:", voice);
         f->addRow("Speech rate (wpm):", rate);
@@ -266,6 +269,7 @@ private:
         location->setText(str(root["location"]));
         userName->setText(str(root["userName"]));
         greeting->setChecked(root["greeting"].toBool(true));
+        hideChatBubble->setChecked(root["hideChatBubble"].toBool(false));
         auto tts = root["tts"].toObject();
         ttsOn->setChecked(tts["enabled"].toBool(true));
         selectVoice(tts);
@@ -294,6 +298,7 @@ private:
         o["location"] = location->text().trimmed();
         o["userName"] = userName->text().trimmed();
         o["greeting"] = greeting->isChecked();
+        o["hideChatBubble"] = hideChatBubble->isChecked();
         QJsonObject tts = o["tts"].toObject();
         const QString selectedVoice = voice->currentData().toString();
         tts["enabled"] = ttsOn->isChecked();

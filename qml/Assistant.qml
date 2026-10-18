@@ -13,7 +13,7 @@ Item {
     readonly property bool bubbleOpen: bubble.isOpen
     // A response bubble is display-only and must stay at the normal widget
     // layer. Only a live text prompt needs a keyboard-focusable surface.
-    readonly property bool inputActive: bubble.mode === "input"
+    readonly property bool inputActive: bubble.mode === "input" && !Config.hideChatBubble
 
     // hit-test rectangles (for the host's input mask). VisualAgent normalizes
     // sprite and Canvas renderer geometry, and a hidden Circle deliberately
@@ -115,6 +115,7 @@ Item {
 
     Bubble {
         id: bubble
+        muted: Config.hideChatBubble
         anchors.horizontalCenter: visual.horizontalCenter
         y: visual.y - height + 26
         hint: brain.providerLabel + "  ·  Enter to ask  ·  Esc to close"
@@ -183,6 +184,10 @@ Item {
 
     // ---------- conversation flow ----------
     function _openAsk() {
+        // When ordinary chat balloons are hidden, the menu's AI drawer and
+        // command-line service remain the intentional prompt entry points.
+        if (Config.hideChatBubble)
+            return
         Speech.stop(); revealTimer.stop(); autoClose.stop()
         visual.endLoop()
         visual.playFirst(["GetAttention", "Wave", "LookUp"])

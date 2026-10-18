@@ -33,6 +33,9 @@ Singleton {
     property string units: cfg.units || (Qt.locale().measurementSystem === Locale.MetricSystem ? "metric" : "imperial")
     property bool useRouter: cfg.router !== false      // answer common requests without the model (best for small models)
     property bool greet: cfg.greeting !== false
+    // Visual-only chat suppression. The assistant can still process CLI/menu
+    // prompts and speak replies; mandatory approval prompts remain visible.
+    property bool hideChatBubble: cfg.hideChatBubble === true
     property var tts: cfg.tts || ({})
     property string userName: cfg.userName || ""
 
