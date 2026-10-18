@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# Resident Revvy AI command interface. A no-argument invocation starts the
+# Quickshell service; requests are routed to the already-running shell over
+# Quickshell IPC and never create a second desktop assistant.
+set -euo pipefail
+
+ROOT=${REVVY_AI_ROOT:-/opt/ttos/revvy-ai}
+QUICKSHELL=${QUICKSHELL_BIN:-quickshell}
+agent=""
+prompt=""
+animation=""
+list_agents=0
+list_animations=0
+service=0
+
+usage() {
+    cat <<'EOF'
+Usage: revvy-ai [options]
+
+Without an action option, starts the resident Revvy AI service.
+
+  -h, --help                 Show this help.
+  -l, --list-animations      List animations for --agent, or the configured agent.
+      --agent-list            List available agents.
+      --agent NAME            Select an available agent for this request.
+  -p, --prompt TEXT          Send a prompt to the resident assistant.
+  -a, --animation NAME       Play a named animation on the resident assistant.
+
+Internal service option:
+      --service               Start Quickshell in single-instance service mode.
+
+Examples:
+  revvy-ai --agent-list
+  revvy-ai --agent tux -l
+  revvy-ai --agent tux -a Wave -p "Summarize my day"
+EOF
+}
+
+agent_dirs() {
+    for root in "$ROOT/themes" "$HOME/.config/revvy-ai/themes"; do
+        [ -d "$root" ] || continue
+        for dir in "$root"/*; do
+            [ -f "$dir/agent.json" ] && printf '%s\n' "${dir##*/}"
+        done
+    done | sort -u
+}
+
+agent_file() {
+    local name=$1 root
+    for root in "$ROOT/themes" "$HOME/.config/revvy-ai/themes"; do
+        if [ -f "$root/$name/agent.json" ]; then
+            printf '%s\n' "$root/$name/agent.json"
+            return 0
+        fi
+    done
+    return 1
+}
+
+while [ $# -gt 0 ]; do
+    case $1 in
+        -h|--help) usage; exit 0 ;;
+        -l|--list-animations) list_animations=1 ;;
+        --agent-list) list_agents=1 ;;
+        --agent)
+            [ $# -ge 2 ] || { echo "revvy-ai: --agent requires a name" >&2; exit 2; }
+            agent=$2; shift ;;
+        -p|--prompt)
+            [ $# -ge 2 ] || { echo "revvy-ai: $1 requires text" >&2; exit 2; }
+            prompt=$2; shift ;;
+        -a|--animation)
+            [ $# -ge 2 ] || { echo "revvy-ai: $1 requires an animation name" >&2; exit 2; }
+            animation=$2; shift ;;
+        --service) service=1 ;;
+        *) echo "revvy-ai: unknown option: $1" >&2; usage >&2; exit 2 ;;
+    esac
+    shift
+done
+
+if [ "$list_agents" -eq 1 ]; then
+    agent_dirs
+    exit 0
+fi
+
+if [ "$list_animations" -eq 1 ]; then
+    if [ -z "$agent" ]; then
+        agent=$(python3 - "$HOME/.config/revvy-ai/config.json" <<'PY'
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("theme", "tux"))
+except Exception:
+    print("tux")
+PY
+)
+    fi
+    file=$(agent_file "$agent") || { echo "revvy-ai: unknown agent: $agent" >&2; exit 2; }
+    python3 - "$file" <<'PY'
+import json, sys
+for name in sorted(json.load(open(sys.argv[1])).get("animations", {})):
+    print(name)
+PY
+    exit 0
+fi
+
+if [ "$service" -eq 1 ] || { [ -z "$agent" ] && [ -z "$prompt" ] && [ -z "$animation" ]; }; then
+    exec "$QUICKSHELL" --no-duplicate --path "$ROOT"
+fi
+
+if [ -n "$agent" ] && ! agent_file "$agent" >/dev/null; then
+    echo "revvy-ai: unknown agent: $agent" >&2
+    exit 2
+fi
+
+# IPC is a client request to the target already registered by shell.qml.
+exec "$QUICKSHELL" --path "$ROOT" ipc call revvy command "$agent" "$prompt" "$animation"

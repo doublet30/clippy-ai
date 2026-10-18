@@ -25,10 +25,46 @@ Item {
     property bool revealDone: true
     property bool replying: false
     property var _decide: null
+    // IPC commands are serialised so a prompt sent while an LLM answer is in
+    // progress is retained rather than discarded by Brain's busy guard.
+    property var commandQueue: []
+    property bool commandDispatching: false
 
     // ---------- public API (also used by IPC) ----------
     function ask(text) { _submit(text) }
     function say(text) { _present(text, true) }
+    function enqueueCommand(agentName, prompt, animationName) {
+        commandQueue = commandQueue.concat([{
+            agent: agentName || "",
+            prompt: prompt || "",
+            animation: animationName || ""
+        }])
+        _dispatchNextCommand()
+    }
+    function _dispatchNextCommand() {
+        if (brain.busy || replying || commandDispatching || commandQueue.length === 0)
+            return
+        const command = commandQueue[0]
+        commandQueue = commandQueue.slice(1)
+        if (command.agent.length > 0 && Config.themeNames().indexOf(command.agent) >= 0)
+            applyChoice("theme", command.agent)
+        if (command.animation.length > 0)
+            playAnimation(command.animation)
+        if (command.prompt.length > 0) {
+            // Applying a theme replaces the sprite on QML's next turn.
+            commandDispatching = true
+            Qt.callLater(function() {
+                root.commandDispatching = false
+                root._submit(command.prompt)
+            })
+        } else {
+            Qt.callLater(root._dispatchNextCommand)
+        }
+    }
+    function playAnimation(name) {
+        if (name.length > 0 && agent.has(name))
+            agent.play(name)
+    }
 
     // ---------- pieces ----------
     Brain {
@@ -195,6 +231,7 @@ Item {
         replying = false
         agent.endLoop()
         autoClose.restart()
+        _dispatchNextCommand()
     }
     Timer { id: autoClose; interval: 22000; onTriggered: if (bubble.mode === "speak") root._dismiss() }
 }

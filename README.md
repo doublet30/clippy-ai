@@ -1,14 +1,17 @@
-# Clippy AI — a QML/Quickshell desktop AI agent
+# Revvy AI — a QML/Quickshell desktop AI agent
 
 A transparent, always-on-top animated character (Clippit + 9 other classic Agent characters)
 that opens a speech bubble → search bar, asks an LLM, pastes the answer into the bubble word by
 word while speaking it aloud and acting it out.
 
 ```bash
-./run.sh                      # = quickshell -p <this dir>
-./run.sh ipc call clippy ask "what's the weather?"   # drive it from scripts / the compositor
+./scripts/revvy-ai --service  # start one resident Quickshell instance
+./scripts/revvy-ai --agent-list
+./scripts/revvy-ai --agent tux -a Wave -p "what's the weather?"
 ```
-The default character is **Tux**; pick another from the right-click menu.
+The default character is **Tux**; pick another from the right-click menu or
+with `revvy-ai --agent NAME`. The command wrapper routes requests to the
+resident service over Quickshell IPC and never opens a second assistant.
 Requires: Quickshell ≥ 0.3 (Wayland layer-shell), Qt 6 with QtMultimedia, `espeak-ng` (voice; any
 command works via `tts.command`). Click Clippy to ask, drag to move, right-click for brain/character menu.
 
@@ -27,7 +30,7 @@ command works via `tts.command`). Click Clippy to ask, drag to move, right-click
 ## Backends (right-click → Brain, or `provider` in config)
 ChatGPT/OpenAI, Claude, Gemini, Grok, Meta Llama (Llama API), and **local** models via any
 OpenAI-compatible server (Ollama default `localhost:11434`, llama.cpp, LM Studio). `auto` picks the
-first with a key. Keys come from `~/.config/clippy-ai/config.json` or env vars
+first with a key. Keys come from `~/.config/revvy-ai/config.json` or env vars
 (`ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY XAI_API_KEY LLAMA_API_KEY`). Default model names
 are in `qml/js/providers.js` — override in config (see `examples/config.json`).
 
@@ -51,9 +54,9 @@ Config reference: `examples/config.json`. Themes: `docs/THEMING.md`.
 ## Configuration utility (C++/Qt)
 ```bash
 cmake -S config-tool -B build -G Ninja && cmake --build build
-./build/clippy-ai-config
+./build/revvy-ai-config
 ```
-Edits `~/.config/clippy-ai/config.json`: active backend, per-backend key/model/base URL
+Edits `~/.config/revvy-ai/config.json`: active backend, per-backend key/model/base URL
 (with **Test connection** and **Fetch models**), terminal policy, character, size, voice, location.
 Unknown keys are preserved and the file is written atomically with mode 0600.
 
@@ -63,9 +66,9 @@ Unknown keys are preserved and the file is written atomically with mode 0600.
 ```
 | Package | Contents |
 |---|---|
-| `clippy-ai` | the program in `/opt/ttos/clippy-ai/`, launcher `/usr/local/bin/clippy-ai` (and `clippy-ai-config`), `.desktop` entries, icon |
-| `clippy-ai-themes-free` | DFSG-free characters: Tux, Konqi, Konqi (classic), Wilber, Larry |
-| `clippy-ai-themes-non-free` | Microsoft Agent characters (Clippit, Merlin, Bonzi, Genie, Genius, F1, Links, Peedy, Rocky, Rover) |
+| `revvy-ai` | the program in `/opt/ttos/revvy-ai/`, launcher `/usr/local/bin/revvy-ai` (and `revvy-ai-config`), `.desktop` entries, icon |
+| `revvy-ai-themes-free` | DFSG-free characters: Tux, Konqi, Konqi (classic), Wilber, Larry |
+| `revvy-ai-themes-non-free` | Microsoft Agent characters (Clippit, Merlin, Bonzi, Genie, Genius, F1, Links, Peedy, Rocky, Rover) |
 
 ---
 

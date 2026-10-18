@@ -1,4 +1,4 @@
-// clippy-ai-config: GUI editor for ~/.config/clippy-ai/config.json
+// revvy-ai-config: GUI editor for ~/.config/revvy-ai/config.json
 // Keeps unknown keys, writes atomically with 0600 permissions (it holds API keys),
 // and can test a backend / list its models using the values currently in the form.
 #include <QtWidgets>
@@ -29,7 +29,7 @@ struct ProviderPage {
 class ConfigWindow : public QMainWindow {
 public:
     ConfigWindow() {
-        setWindowTitle("Clippy AI – Configuration");
+        setWindowTitle("Revvy AI – Configuration");
         resize(720, 560);
         auto *tabs = new QTabWidget;
         tabs->addTab(buildBrainTab(), "AI backend");
@@ -65,7 +65,7 @@ public:
 
 private:
     QJsonObject root;
-    QString path = QDir::homePath() + "/.config/clippy-ai/config.json";
+    QString path = QDir::homePath() + "/.config/revvy-ai/config.json";
     QLabel *pathLabel;
     QComboBox *active, *terminal, *theme, *pin, *launch;
     QStackedWidget *stack;
@@ -128,9 +128,9 @@ private:
         theme = new QComboBox; theme->setEditable(true);
         // Themes are optional packages: list whatever is installed (system dir, next to the build, per-user).
         QStringList themes;
-        QStringList roots = {"/opt/ttos/clippy-ai/themes", QCoreApplication::applicationDirPath() + "/../themes",
+        QStringList roots = {"/opt/ttos/revvy-ai/themes", QCoreApplication::applicationDirPath() + "/../themes",
                              QCoreApplication::applicationDirPath() + "/../../themes", QCoreApplication::applicationDirPath() + "/../../../themes",
-                             QDir::homePath() + "/.config/clippy-ai/themes"};
+                             QDir::homePath() + "/.config/revvy-ai/themes"};
         for (auto &r : roots)
             for (auto &e : QDir(r).entryList(QDir::Dirs | QDir::NoDotAndDotDot))
                 if (QFile::exists(r + "/" + e + "/agent.json") && !themes.contains(e)) themes << e;
@@ -344,7 +344,7 @@ private:
 
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
-    app.setApplicationName("clippy-ai-config");
+    app.setApplicationName("revvy-ai-config");
     ConfigWindow w;
     if (app.arguments().contains("--reset-position")) { return w.resetPosition() ? 0 : 1; }   // headless recovery: clippy-ai-config --reset-position
     if (app.arguments().contains("--save-and-quit")) { w.saveNow(); return 0; }  // round-trip test / normalise file

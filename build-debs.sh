@@ -10,7 +10,7 @@ set -euo pipefail
 ROOT=$(dirname "$(readlink -f "$0")")
 cd "$ROOT"
 
-NAME=clippy-ai
+NAME=revvy-ai
 PREFIX=/opt/ttos/$NAME
 VERSION=${VERSION:-$(cat VERSION)}
 ARCH=$(dpkg --print-architecture)
@@ -21,7 +21,7 @@ GIT_MAIL=$(git config user.email 2>/dev/null || true)
 MAINTAINER=${MAINTAINER:-"${GIT_NAME:-Unknown} <${GIT_MAIL:-unknown@example.com}>"}
 YEAR=$(date +%Y)
 DATE_RFC=$(date -R)
-HOMEPAGE=${HOMEPAGE:-https://github.com/doublet30/clippy-ai}
+HOMEPAGE=${HOMEPAGE:-https://github.com/doublet30/revvy-ai}
 
 FREE_THEMES=(tux konqi konqi-classic wilber larry)
 NONFREE_THEMES=(bonzi clippy f1 genie genius links merlin peedy rocky rover)
@@ -46,7 +46,7 @@ for t in "${NONFREE_THEMES[@]}"; do [[ -f themes/$t/agent.json ]] || HAVE_NONFRE
 (( HAVE_NONFREE )) || echo "NOTE: non-free themes not present in themes/ - skipping clippy-ai-themes-non-free"
 
 # ---------------------------------------------------------------- build the C++ config tool
-log "Building clippy-ai-config"
+log "Building revvy-ai-config"
 cmake -S config-tool -B "$BUILD/config-tool" -DCMAKE_BUILD_TYPE=Release >/dev/null
 cmake --build "$BUILD/config-tool" -j"$JOBS"
 
@@ -98,45 +98,43 @@ install -d "$P$PREFIX/bin" "$P$PREFIX/themes" "$P/usr/local/bin" "$P/usr/share/a
            "$P/usr/share/icons/hicolor/scalable/apps" "$P/usr/share/doc/$NAME" "$P/usr/share/lintian/overrides" "$P/DEBIAN"
 cp -r shell.qml qml docs examples README.md VERSION "$P$PREFIX/"
 [[ -f LICENSE ]] && cp LICENSE "$P$PREFIX/"
-install -m755 "$BUILD/config-tool/clippy-ai-config" "$P$PREFIX/bin/clippy-ai-config"
-strip --strip-unneeded "$P$PREFIX/bin/clippy-ai-config"
-
-cat > "$P/usr/local/bin/clippy-ai" <<SH
+install -m755 "$BUILD/config-tool/revvy-ai-config" "$P$PREFIX/bin/revvy-ai-config"
+strip --strip-unneeded "$P$PREFIX/bin/revvy-ai-config"
+install -m755 scripts/revvy-ai "$P/usr/local/bin/revvy-ai"
+sed "s|/opt/ttos/revvy-ai|$PREFIX|g" "$P/usr/local/bin/revvy-ai" > "$P/usr/local/bin/revvy-ai.tmp"
+mv "$P/usr/local/bin/revvy-ai.tmp" "$P/usr/local/bin/revvy-ai"
+cat > "$P/usr/local/bin/revvy-ai-config" <<SH
 #!/usr/bin/env bash
-# Launch the Clippy AI desktop assistant (Quickshell widget). Extra args go to quickshell, e.g.
-#   clippy-ai ipc call clippy ask "what's the weather?"
-exec quickshell -p $PREFIX "\$@"
+exec $PREFIX/bin/revvy-ai-config "\$@"
 SH
-cat > "$P/usr/local/bin/clippy-ai-config" <<SH
-#!/usr/bin/env bash
-exec $PREFIX/bin/clippy-ai-config "\$@"
-SH
-chmod 755 "$P/usr/local/bin/clippy-ai" "$P/usr/local/bin/clippy-ai-config"
+chmod 755 "$P/usr/local/bin/revvy-ai" "$P/usr/local/bin/revvy-ai-config"
+install -d "$P/usr/lib/systemd/user"
+install -m644 packaging/systemd/revvy-ai.service "$P/usr/lib/systemd/user/revvy-ai.service"
 
-cat > "$P/usr/share/applications/clippy-ai.desktop" <<DESKTOP
+cat > "$P/usr/share/applications/revvy-ai.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=Clippy AI
+Name=Revvy AI
 GenericName=AI Desktop Assistant
 Comment=Animated AI assistant that lives on your desktop
-Exec=/usr/local/bin/clippy-ai
-Icon=clippy-ai
+Exec=/usr/local/bin/revvy-ai
+Icon=revvy-ai
 Terminal=false
 Categories=Utility;Qt;
 Keywords=assistant;ai;chat;clippy;
 StartupNotify=false
 DESKTOP
-cat > "$P/usr/share/applications/clippy-ai-config.desktop" <<DESKTOP
+cat > "$P/usr/share/applications/revvy-ai-config.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=Clippy AI Settings
-Comment=Configure the AI backend for Clippy AI
-Exec=/usr/local/bin/clippy-ai-config
-Icon=clippy-ai
+Name=Revvy AI Settings
+Comment=Configure the AI backend for Revvy AI
+Exec=/usr/local/bin/revvy-ai-config
+Icon=revvy-ai
 Terminal=false
 Categories=Settings;Qt;
 DESKTOP
-cp tools/mascots/art/tux.svg "$P/usr/share/icons/hicolor/scalable/apps/clippy-ai.svg"
+cp tools/mascots/art/tux.svg "$P/usr/share/icons/hicolor/scalable/apps/revvy-ai.svg"
 
 cat > "$P/usr/share/lintian/overrides/$NAME" <<OVERRIDES
 # Installation under /opt/ttos and launchers in /usr/local/bin are deliberate (ttos layout).
@@ -151,6 +149,10 @@ set -e
 if [ "$1" = configure ]; then
     command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q /usr/share/applications || true
     command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+    # Make the resident IPC endpoint available automatically in graphical
+    # user sessions. It starts on the next login; users can also start it now
+    # with `systemctl --user start revvy-ai.service`.
+    command -v systemctl >/dev/null 2>&1 && systemctl --global enable revvy-ai.service >/dev/null 2>&1 || true
 fi
 exit 0
 SH
@@ -163,7 +165,7 @@ Files: *
 Copyright: $YEAR $MAINTAINER
 License: $PROJECT_LICENSE
 
-Files: usr/share/icons/hicolor/scalable/apps/clippy-ai.svg
+Files: usr/share/icons/hicolor/scalable/apps/revvy-ai.svg
 Copyright: Larry Ewing, Garrett LeSage, Simon Budig
 License: Tux
  Tux was created by Larry Ewing with The GIMP; the SVG redraw is by Garrett LeSage and
@@ -183,7 +185,7 @@ SHLIBS=$(
     d=$(mktemp -d)
     mkdir "$d/debian"
     printf 'Source: x\n\nPackage: x\nArchitecture: any\n' > "$d/debian/control"
-    (cd "$d" && dpkg-shlibdeps -O -e"$P$PREFIX/bin/clippy-ai-config" 2>/dev/null) | sed 's/^shlibs:Depends=//'
+    (cd "$d" && dpkg-shlibdeps -O -e"$P$PREFIX/bin/revvy-ai-config" 2>/dev/null) | sed 's/^shlibs:Depends=//'
     rm -rf "$d"
 )
 control "$NAME" "$ARCH" utils \
@@ -195,10 +197,10 @@ control "$NAME" "$ARCH" utils \
  asks an AI model (ChatGPT, Claude, Gemini, Grok, Meta Llama or a local model),
  types the answer into the bubble and speaks it aloud. It can fetch the weather
  and time, search the web and run terminal commands with your approval.
- Includes the clippy-ai-config settings utility.
+ Includes the revvy-ai-config settings utility.
  .
- Characters are provided by the clippy-ai-themes-free and
- clippy-ai-themes-non-free packages."
+ Characters are provided by the revvy-ai-themes-free and
+ revvy-ai-themes-non-free packages."
 finish "$NAME"
 
 # ================================================================= themes
@@ -260,9 +262,9 @@ License: GPL-3+
 COPYRIGHT
 } > "$STAGE/$NAME-themes-free/usr/share/doc/$NAME-themes-free/copyright"
 control "$NAME-themes-free" all graphics "$NAME (>= $VERSION)" "" "" \
-    "Free-licensed mascot characters for Clippy AI
+    "Free-licensed mascot characters for Revvy AI
  Tux, Konqi (new and classic), Wilber (GIMP) and Larry the Cow, animated as
- desktop assistant characters for Clippy AI. Tux is rigged from his layered
+ desktop assistant characters for Revvy AI. Tux is rigged from his layered
  SVG; the others are puppet-animated. Licences vary per character; see the
  copyright file."
 finish "$NAME-themes-free"
@@ -293,10 +295,10 @@ License: MIT
 COPYRIGHT
 } > "$DOC/copyright"
 control "$NAME-themes-non-free" all non-free/graphics "$NAME (>= $VERSION)" "" "" \
-    "Microsoft Agent characters for Clippy AI (non-free)
+    "Microsoft Agent characters for Revvy AI (non-free)
  Clippit, Merlin, Bonzi, Genie, Genius, F1, Links, Peedy, Rocky and Rover
  animated sprite sets with sound effects. The artwork is proprietary and has no
- free licence, so it is shipped separately from clippy-ai-themes-free."
+ free licence, so it is shipped separately from revvy-ai-themes-free."
 finish "$NAME-themes-non-free"
 fi
 

@@ -3,12 +3,12 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// User config: ~/.config/clippy-ai/config.json  (see docs/CONFIG.md)
+// User config: ~/.config/revvy-ai/config.json  (see docs/CONFIG.md)
 // Mutable UI choices (provider/theme/mute) persist in state.json beside it.
 Singleton {
     id: root
 
-    readonly property string dir: Sys.home() + "/.config/clippy-ai"
+    readonly property string dir: Sys.home() + "/.config/revvy-ai"
 
     property var cfg: ({})
     property var state: ({})
@@ -38,7 +38,7 @@ Singleton {
 
     readonly property var providerIds: ["openai", "anthropic", "gemini", "llama", "grok", "local"]
     property var systemThemes: []  // [{name, dir}] shipped next to this config (themes/ in the install dir)
-    property var userThemes: []   // [{name, dir}] discovered in ~/.config/clippy-ai/themes
+    property var userThemes: []   // [{name, dir}] discovered in ~/.config/revvy-ai/themes
 
     function themeDir(name) {
         for (var i = 0; i < userThemes.length; i++)

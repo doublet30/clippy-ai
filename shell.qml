@@ -5,7 +5,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import "qml"
 
-// Entry point:  quickshell -p /path/to/clippy-ai
+// Entry point:  quickshell -p /path/to/revvy-ai
 // The same `Assistant` item can be dropped into any other Quickshell config.
 ShellRoot {
     id: shell
@@ -22,7 +22,7 @@ ShellRoot {
         // "Keep below": sit under normal windows (above the wallpaper). The layer is raised while the bubble is
         // open because only the Top/Overlay layers can take keyboard focus for typing a question.
         WlrLayershell.layer: (Config.pin === "below" && !assistant.bubbleOpen) ? WlrLayer.Bottom : WlrLayer.Top
-        WlrLayershell.namespace: "clippy-ai"
+        WlrLayershell.namespace: "revvy-ai"
         WlrLayershell.keyboardFocus: assistant.wantsKeyboard ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
         // Position: centred by default; dragging moves the margins and the spot is remembered (Config.pos).
@@ -66,11 +66,15 @@ ShellRoot {
         }
     }
 
-    // Remote control:  quickshell -p <dir> ipc call clippy ask "what's the weather?"
+    // Remote control is sent by /usr/local/bin/revvy-ai. Quickshell routes
+    // this to the resident shell; the CLI does not create a second window.
     IpcHandler {
-        target: "clippy"
+        target: "revvy"
         function ask(question: string): void { assistant.ask(question) }
         function say(text: string): void { assistant.say(text) }
+        function command(agent: string, prompt: string, animation: string): void {
+            assistant.enqueueCommand(agent, prompt, animation)
+        }
         function snapshot(path: string): void { assistant.grabToImage(r => r.saveToFile(path)) }   // debug: render to PNG
         function status(): void { console.log("STATUS " + assistant.statusText + " pos=" + Math.round(win.mx) + "," + Math.round(win.my) + " layer=" + win.layerNow + " screen=" + win.sw + "x" + win.sh) }
         function select(kind: string, value: string): void { assistant.applyChoice(kind, value) }   // same as the right-click menu
