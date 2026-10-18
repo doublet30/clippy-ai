@@ -58,7 +58,11 @@ ShellRoot {
         Assistant {
             id: assistant
             anchors.fill: parent
-            readonly property bool wantsKeyboard: true
+            // Request keyboard focus only while the prompt is actually open.
+            // This makes a desktop click or another application's activation
+            // return focus immediately instead of leaving a hidden widget
+            // surface as the active Wayland target.
+            readonly property bool wantsKeyboard: bubbleOpen
             onMoveBy: (dx, dy) => { win.dragging = true; win.mx = win.clampX(win.mx + dx); win.my = win.clampY(win.my + dy) }
             onMoveFinished: { win.dragging = false; Config.save("pos", { x: Math.round(win.mx), y: Math.round(win.my) }) }
             onResetPosition: { win.dragging = false; Config.save("pos", null); win.place() }

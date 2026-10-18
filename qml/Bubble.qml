@@ -189,6 +189,14 @@ Item {
                         selectByMouse: true
                         onAccepted: { var t = text.trim(); if (t) root.submitted(t) }
                         Keys.onEscapePressed: root.dismissed()
+                        // The widget only owns keyboard focus for an active
+                        // prompt.  A click on the desktop or another window
+                        // clears this focus on both Wayland and X11; dismiss
+                        // the bubble just like the menu's AI drawer does.
+                        onActiveFocusChanged: {
+                            if (!activeFocus && root.mode === "input")
+                                root.dismissed()
+                        }
                         Text {
                             visible: !field.text && !field.preeditText
                             text: "Ask me anything…"
