@@ -71,7 +71,8 @@ private:
     QStackedWidget *stack;
     QListWidget *list;
     QList<ProviderPage> pages;
-    QDoubleSpinBox *scale; QLineEdit *location, *userName, *voice;
+    QDoubleSpinBox *scale; QLineEdit *location, *userName;
+    QComboBox *voice;
     QCheckBox *greeting, *ttsOn; QSpinBox *rate, *pitch;
     QNetworkAccessManager nam;
 
@@ -152,7 +153,9 @@ private:
         userName = new QLineEdit;
         greeting = new QCheckBox("Say hello on startup");
         ttsOn = new QCheckBox("Speak answers aloud");
-        voice = new QLineEdit; voice->setPlaceholderText("espeak-ng voice, e.g. en-us");
+        voice = new QComboBox;
+        voice->setToolTip("Choose automatic voice selection, an installed Piper neural voice, or an eSpeak fallback.");
+        populateVoiceChoices();
         rate = new QSpinBox; rate->setRange(80, 400);
         pitch = new QSpinBox; pitch->setRange(0, 99);
         auto *resetPos = new QPushButton("Reset widget position (re-centre)");
@@ -176,6 +179,66 @@ private:
     }
 
     static QString str(const QJsonValue &v, const QString &d = {}) { return v.isString() ? v.toString() : d; }
+
+    void populateVoiceChoices() {
+        voice->clear();
+        // Keep the existing out-of-the-box behavior available, while making a
+        // specific installed neural voice a deliberate and durable choice.
+        voice->addItem("Automatic (best available Piper voice)", "auto");
+        voice->insertSeparator(voice->count());
+
+        QSet<QString> seen;
+        const QStringList roots = {
+            QDir::homePath() + "/.local/share/clippy-ai/voices",
+            QDir::homePath() + "/.local/share/ttos/assistant/piper",
+            "/opt/ttos/revvy-ai/voices",
+            "/usr/share/piper-voices"
+        };
+        for (const QString &root : roots) {
+            const QFileInfoList models = QDir(root).entryInfoList({"*.onnx"},
+                QDir::Files | QDir::Readable, QDir::Name | QDir::IgnoreCase);
+            for (const QFileInfo &model : models) {
+                const QString path = model.canonicalFilePath().isEmpty()
+                    ? model.absoluteFilePath() : model.canonicalFilePath();
+                if (seen.contains(path))
+                    continue;
+                seen.insert(path);
+                QString label = model.completeBaseName();
+                label.replace('_', '-');
+                voice->addItem("Piper — " + label, "piper:" + path);
+            }
+        }
+
+        voice->insertSeparator(voice->count());
+        voice->addItem("eSpeak NG — English (US)", "espeak:en-us");
+        voice->addItem("eSpeak NG — English (British)", "espeak:en-gb");
+    }
+
+    void selectVoice(const QJsonObject &tts) {
+        const QString engine = str(tts["engine"], "auto");
+        const QJsonObject piper = tts["piper"].toObject();
+        QString selection;
+        if (engine == "piper" && !str(piper["model"]).isEmpty())
+            selection = "piper:" + str(piper["model"]);
+        else if (engine == "espeak")
+            selection = "espeak:" + str(tts["voice"], "en-us");
+        else
+            selection = "auto";
+
+        int index = voice->findData(selection);
+        if (index < 0 && selection.startsWith("piper:")) {
+            const QString model = selection.mid(QString("piper:").size());
+            voice->insertItem(1, "Piper — " + QFileInfo(model).completeBaseName()
+                              + " (not installed)", selection);
+            index = 1;
+        }
+        if (index < 0 && selection.startsWith("espeak:")) {
+            const QString espeakVoice = selection.mid(QString("espeak:").size());
+            voice->addItem("eSpeak NG — " + espeakVoice, selection);
+            index = voice->count() - 1;
+        }
+        voice->setCurrentIndex(index < 0 ? 0 : index);
+    }
 
     void load() {
         root = {};
@@ -205,7 +268,7 @@ private:
         greeting->setChecked(root["greeting"].toBool(true));
         auto tts = root["tts"].toObject();
         ttsOn->setChecked(tts["enabled"].toBool(true));
-        voice->setText(str(tts["voice"], "en-us"));
+        selectVoice(tts);
         rate->setValue(tts["rate"].toInt(170));
         pitch->setValue(tts["pitch"].toInt(60));
     }
@@ -232,7 +295,22 @@ private:
         o["userName"] = userName->text().trimmed();
         o["greeting"] = greeting->isChecked();
         QJsonObject tts = o["tts"].toObject();
-        tts["enabled"] = ttsOn->isChecked(); tts["voice"] = voice->text().trimmed();
+        const QString selectedVoice = voice->currentData().toString();
+        tts["enabled"] = ttsOn->isChecked();
+        if (selectedVoice.startsWith("piper:")) {
+            QJsonObject piper = tts["piper"].toObject();
+            piper["model"] = selectedVoice.mid(QString("piper:").size());
+            tts["piper"] = piper;
+            tts["engine"] = "piper";
+        } else if (selectedVoice.startsWith("espeak:")) {
+            tts["voice"] = selectedVoice.mid(QString("espeak:").size());
+            tts["engine"] = "espeak";
+        } else {
+            QJsonObject piper = tts["piper"].toObject();
+            piper.remove("model");
+            if (piper.isEmpty()) tts.remove("piper"); else tts["piper"] = piper;
+            tts["engine"] = "auto";
+        }
         tts["rate"] = rate->value(); tts["pitch"] = pitch->value();
         o["tts"] = tts;
 
