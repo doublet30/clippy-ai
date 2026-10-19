@@ -52,7 +52,8 @@ compositor/app control, alarms, mail, calendar and phone dialing plug in.
 - `themes/` – 10 classic Agent characters (from pithings/clippy) + Linux mascots Tux, Konqi (new & classic), Wilber, Larry; credits/licences in `themes/CREDITS.md`.
 - `tools/mascots/build.py` – generates mascot themes from SVG/PNG art (Tux is rigged: wings, eyes, blink, beak).
 
-Config reference: `examples/config.json`. Themes: `docs/THEMING.md`.
+Config reference: `examples/config.json`. Themes: `docs/THEMING.md`. Local
+intent-routing development: [`docs/INTENT_ROUTING.md`](docs/INTENT_ROUTING.md).
 
 ### Circle AI renderer
 
