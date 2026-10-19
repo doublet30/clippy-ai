@@ -391,6 +391,7 @@ private:
         // the systemd default.target enablement for reliable X11/Wayland login.
         const QString autostartDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + "/autostart";
         const QString autostartFile = autostartDir + "/revvy-ai-voice.desktop";
+        int unitResult = 0;
         if (hotwordEnabled->isChecked()) {
             QDir().mkpath(autostartDir);
             QSaveFile startup(autostartFile);
@@ -408,13 +409,26 @@ private:
         } else {
             QFile::remove(autostartFile);
         }
-        const int unitResult = QProcess::execute(QStringLiteral("systemctl"),
-            {QStringLiteral("--user"), hotwordEnabled->isChecked() ? QStringLiteral("enable") : QStringLiteral("disable"),
-             QStringLiteral("--now"), QStringLiteral("revvy-ai-voice.service")});
-        if (hotwordEnabled->isChecked() && unitResult == 0) {
-            // Restart applies a changed hotword or timing value immediately.
-            QProcess::execute(QStringLiteral("systemctl"),
-                              {QStringLiteral("--user"), QStringLiteral("restart"), QStringLiteral("revvy-ai-voice.service")});
+        // The assistant widget owns whether Revvy exists in a session.  Do
+        // not enable the listener as an independent systemd startup unit:
+        // doing so used to start (or repeatedly attempt to start) Revvy even
+        // after the user turned its widget off.  The XDG entry created above
+        // requests a start next login only when voice is enabled, and the
+        // listener's Requisite=revvy-ai.service then accepts it only after
+        // widgetctl has started the enabled Revvy widget.
+        QProcess::execute(QStringLiteral("systemctl"),
+                          {QStringLiteral("--user"), QStringLiteral("disable"),
+                           QStringLiteral("revvy-ai-voice.service")});
+        if (hotwordEnabled->isChecked()) {
+            // Apply changed hotword or timing settings immediately if the
+            // visible assistant widget is currently active.
+            unitResult = QProcess::execute(QStringLiteral("systemctl"),
+                                           {QStringLiteral("--user"), QStringLiteral("restart"),
+                                            QStringLiteral("revvy-ai-voice.service")});
+        } else {
+            unitResult = QProcess::execute(QStringLiteral("systemctl"),
+                                           {QStringLiteral("--user"), QStringLiteral("stop"),
+                                            QStringLiteral("revvy-ai-voice.service")});
         }
         // Older releases kept transient widget choices in state.json. Saving
         // here is an explicit choice, so drop those stale overrides.
