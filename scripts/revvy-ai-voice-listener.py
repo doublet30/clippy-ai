@@ -4,6 +4,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -13,6 +14,7 @@ CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.c
 MODEL = os.path.join(ROOT, "voice-model", "vosk-model-small-en-us-0.15")
 REVVY = os.environ.get("REVVY_AI_BIN", "/usr/local/bin/revvy-ai")
 RATE = 16000
+AUTO_SOURCE = "revvy_auto_mic"
 
 
 def log(message):
@@ -61,7 +63,113 @@ def dispatch(prompt):
                           stderr=subprocess.DEVNULL, check=False).returncode == 0
 
 
-def make_stream(sounddevice):
+def pactl(*args, json_output=False):
+    """Run pactl without making a missing Pulse compatibility server fatal."""
+    if not shutil.which("pactl"):
+        return None
+    command = ["pactl"]
+    if json_output:
+        command += ["-f", "json"]
+    command += list(args)
+    try:
+        result = subprocess.run(command, capture_output=True, text=True,
+                                check=False, timeout=8)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    if json_output:
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return None
+    return result.stdout.strip()
+
+
+def actual_sources():
+    """Return microphone-like Pulse sources, never a sink monitor."""
+    sources = pactl("list", "sources", json_output=True) or []
+    return [source for source in sources
+            if source.get("name") and not source["name"].endswith(".monitor")]
+
+
+def source_volume_percent(source):
+    values = source.get("volume", {}).values()
+    levels = []
+    for value in values:
+        match = re.match(r"(\d+)%", str(value.get("value_percent", "")))
+        if match:
+            levels.append(int(match.group(1)))
+    return min(levels) if levels else 100
+
+
+def first_alsa_capture_device():
+    """Choose the first real capture PCM only when Pulse exposes no mic."""
+    if not shutil.which("arecord"):
+        return None
+    try:
+        listing = subprocess.run(["arecord", "-l"], capture_output=True, text=True,
+                                 check=False, timeout=8).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = re.search(r"card (\d+):.*?device (\d+):", listing)
+    return "hw:%s,%s" % match.groups() if match else None
+
+
+def choose_microphone():
+    """Ensure a physical capture source exists and make it Pulse's default.
+
+    Some RevolutionUI logins restore an output-only card profile.  Pulse then
+    exposes only an ``*.monitor`` source, which causes PortAudio's ALSA
+    ``default`` device to record desktop audio instead of the microphone.
+    A private module-alsa-source preserves the user's output profile while
+    exposing the hardware capture PCM for Revvy.
+    """
+    sources = actual_sources()
+    if not sources:
+        device = first_alsa_capture_device()
+        if device:
+            module = pactl("load-module", "module-alsa-source", "device=" + device,
+                           "source_name=" + AUTO_SOURCE)
+            if module:
+                log("created microphone source %s from %s" % (AUTO_SOURCE, device))
+                for _ in range(20):
+                    time.sleep(0.25)
+                    sources = actual_sources()
+                    if sources:
+                        break
+    if not sources:
+        log("no physical microphone source is available; waiting for PipeWire")
+        return None
+
+    info = pactl("info", json_output=True) or {}
+    default_name = info.get("default_source_name", "")
+    source = next((item for item in sources if item["name"] == default_name), None)
+    if source is None:
+        # Prefer our capture source, then an actively-running real input.
+        source = next((item for item in sources if item["name"] == AUTO_SOURCE), None)
+        source = source or next((item for item in sources if item.get("state") == "RUNNING"), sources[0])
+    name = source["name"]
+    pactl("set-default-source", name)
+    pactl("set-source-mute", name, "0")
+    if source_volume_percent(source) < 80:
+        pactl("set-source-volume", name, "85%")
+    log("using microphone source: %s (unmuted; volume %s%%)" %
+        (name, max(source_volume_percent(source), 80)))
+    return name
+
+
+def pulse_capture_device(sounddevice):
+    """Use Pulse/PipeWire explicitly instead of PortAudio's ALSA default."""
+    for index, device in enumerate(sounddevice.query_devices()):
+        if device.get("max_input_channels", 0) < 1:
+            continue
+        if device.get("name", "").strip().lower() == "pulse":
+            return index
+    return None
+
+
+def make_stream(sounddevice, device):
     audio = queue.Queue(maxsize=48)
 
     def callback(indata, _frames, _time, status):
@@ -78,14 +186,14 @@ def make_stream(sounddevice):
             except queue.Full:
                 pass
 
-    stream = sounddevice.RawInputStream(samplerate=RATE, blocksize=1600,
+    stream = sounddevice.RawInputStream(device=device, samplerate=RATE, blocksize=1600,
                                         dtype="int16", channels=1,
                                         callback=callback)
     return stream, audio
 
 
-def listen_for_hotword(sounddevice, recognizer, variants):
-    stream, audio = make_stream(sounddevice)
+def listen_for_hotword(sounddevice, recognizer, variants, device):
+    stream, audio = make_stream(sounddevice, device)
     with stream:
         while True:
             data = audio.get()
@@ -97,10 +205,10 @@ def listen_for_hotword(sounddevice, recognizer, variants):
                 return
 
 
-def capture_command(sounddevice, model, seconds):
+def capture_command(sounddevice, model, seconds, device):
     from vosk import KaldiRecognizer
     recognizer = KaldiRecognizer(model, RATE)
-    stream, audio = make_stream(sounddevice)
+    stream, audio = make_stream(sounddevice, device)
     deadline = time.monotonic() + max(2, min(30, int(seconds)))
     pieces = []
     with stream:
@@ -155,14 +263,24 @@ def main():
     variants = aliases(str(cfg.get("hotword", "Hey Revvy!")))
     if len(sys.argv) == 3 and sys.argv[1] == "--test-wav":
         return test_wav(sys.argv[2], model, variants)
+    microphone = choose_microphone()
+    if microphone is None:
+        # Do not terminate: audio hardware can appear after a late session
+        # startup or USB hotplug. The retry loop below keeps the service alive.
+        log("microphone setup will be retried until an input becomes available")
     log("listening for hotword: " + str(cfg.get("hotword", "Hey Revvy!")))
     while True:
         try:
+            if microphone is None:
+                time.sleep(2)
+                microphone = choose_microphone()
+                continue
+            device = pulse_capture_device(sounddevice)
             recognizer = KaldiRecognizer(model, RATE)
-            listen_for_hotword(sounddevice, recognizer, variants)
+            listen_for_hotword(sounddevice, recognizer, variants, device)
             log("hotword detected; opening command window")
             animate("Processing")
-            prompt = capture_command(sounddevice, model, cfg.get("commandSeconds", 8))
+            prompt = capture_command(sounddevice, model, cfg.get("commandSeconds", 8), device)
             if prompt and dispatch(prompt):
                 log("recognized a command; dispatched it to Revvy")
             else:
@@ -171,6 +289,7 @@ def main():
             time.sleep(max(0, min(60, int(cfg.get("cooldownSeconds", 2)))))
         except Exception as error:
             log("audio or recognition error: " + str(error))
+            microphone = None
             time.sleep(2)
 
 

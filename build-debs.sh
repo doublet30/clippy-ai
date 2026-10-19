@@ -231,7 +231,7 @@ SHLIBS=$(
     rm -rf "$d"
 )
 control "$NAME" "$ARCH" utils \
-    "quickshell, qml6-module-qtquick, qml6-module-qtquick-shapes, qml6-module-qtmultimedia, python3, libportaudio2, $SHLIBS" \
+    "quickshell, qml6-module-qtquick, qml6-module-qtquick-shapes, qml6-module-qtmultimedia, python3, libportaudio2, pulseaudio-utils, $SHLIBS" \
     "$NAME-themes-free (>= $VERSION), espeak-ng, xdg-utils" \
     "ollama, $NAME-themes-non-free (>= $VERSION)" \
     "Animated multi-backend AI desktop assistant (Quickshell/QML)
