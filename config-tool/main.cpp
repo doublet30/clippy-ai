@@ -221,7 +221,7 @@ private:
         f->addRow("Detection sensitivity:", hotwordSensitivity);
         f->addRow("Voice profile:", trainer);
         v->addLayout(f);
-        auto *note = new QLabel("Speech recognition runs locally with PocketSphinx. Audio is used only for hotword detection and the short command window, then the recognized text is sent to the running Revvy AI service.");
+        auto *note = new QLabel("Speech recognition runs locally with Vosk. Audio is used only for hotword detection and the short command window, then the recognized text is sent to the running Revvy AI service.");
         note->setWordWrap(true);
         note->setStyleSheet("color:gray");
         v->addWidget(note);
@@ -389,6 +389,28 @@ private:
         out.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
         if (!out.commit()) { QMessageBox::critical(this, "Save failed", out.errorString()); return; }
         root = o;
+        // RevolutionUI's custom sessions do not consistently activate
+        // graphical-session.target. Keep an XDG autostart fallback beside
+        // the systemd default.target enablement for reliable X11/Wayland login.
+        const QString autostartDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + "/autostart";
+        const QString autostartFile = autostartDir + "/revvy-ai-voice.desktop";
+        if (hotwordEnabled->isChecked()) {
+            QDir().mkpath(autostartDir);
+            QSaveFile startup(autostartFile);
+            if (startup.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                startup.write("[Desktop Entry]\\n"
+                              "Type=Application\\n"
+                              "Name=Revvy AI Voice Recognition\\n"
+                              "Comment=Start the Revvy AI offline hotword listener\\n"
+                              "Exec=systemctl --user start revvy-ai-voice.service\\n"
+                              "Terminal=false\\n"
+                              "NoDisplay=true\\n"
+                              "X-GNOME-Autostart-enabled=true\\n");
+                startup.commit();
+            }
+        } else {
+            QFile::remove(autostartFile);
+        }
         const int unitResult = QProcess::execute(QStringLiteral("systemctl"),
             {QStringLiteral("--user"), hotwordEnabled->isChecked() ? QStringLiteral("enable") : QStringLiteral("disable"),
              QStringLiteral("--now"), QStringLiteral("revvy-ai-voice.service")});
