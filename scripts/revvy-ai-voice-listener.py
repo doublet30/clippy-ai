@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 from array import array
+from difflib import SequenceMatcher
 
 ROOT = os.environ.get("REVVY_AI_ROOT", "/opt/ttos/revvy-ai")
 CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "revvy-ai", "config.json")
@@ -16,6 +17,23 @@ MODEL = os.path.join(ROOT, "voice-model", "vosk-model-small-en-us-0.15")
 REVVY = os.environ.get("REVVY_AI_BIN", "/usr/local/bin/revvy-ai")
 RATE = 16000
 AUTO_SOURCE = "revvy_auto_mic"
+
+# Vosk's small general-English model does not contain the proper name
+# "Revvy".  These are common *in-vocabulary* phonetic renderings used until a
+# local calibration contributes the renderings heard from this user's voice.
+DEFAULT_REVVY_ALIASES = (
+    "hey ready", "hey riley", "hey ruby", "hey remy", "hey ravi",
+    "the red meat", "the remedy",
+)
+
+# The old UI stored PocketSphinx-style thresholds but the Vosk listener never
+# consumed them.  Map them to the minimum normalized text-match score used by
+# the Vosk wake decoder.  Exact calibrated aliases always score 1.0.
+SENSITIVITY_SCORES = {
+    "1e-20": 0.60,  # More sensitive
+    "1e-30": 0.74,  # Balanced
+    "1e-40": 0.86,  # Stricter
+}
 
 
 def log(message):
@@ -28,7 +46,7 @@ def normalized(value):
 
 def settings():
     values = {"enabled": False, "hotword": "Hey Revvy!", "commandSeconds": 8,
-              "cooldownSeconds": 2}
+              "cooldownSeconds": 2, "keywordThreshold": "1e-30"}
     try:
         with open(CONFIG, encoding="utf-8") as source:
             values.update(json.load(source).get("speechRecognition", {}))
@@ -37,27 +55,113 @@ def settings():
     return values
 
 
+def append_alias(values, candidate):
+    candidate = normalized(str(candidate))
+    if 1 <= len(candidate.split()) <= 5 and candidate not in values:
+        values.append(candidate)
+
+
 def aliases(hotword, trained_aliases=()):
     phrase = normalized(hotword) or "hey revvy"
-    values = {phrase}
+    values = []
+    append_alias(values, phrase)
     name = phrase[4:] if phrase.startswith("hey ") else phrase
     if name in {"revvy", "revy"}:
         # The small general-English model does not contain "Revvy". These
         # cover its common phonetic transcriptions of the spoken wake phrase.
-        values.update({"hey revy", "hey ready", "hey riley", "hey ruby",
-                       "hey remy", "hey ravi", "the red meat", "the remedy"})
+        for candidate in DEFAULT_REVVY_ALIASES:
+            append_alias(values, candidate)
     for candidate in trained_aliases:
-        candidate = normalized(str(candidate))
         # A profile is local user data, but keep its aliases bounded so a
         # malformed config cannot turn arbitrary speech into a wake phrase.
-        if 1 <= len(candidate.split()) <= 4:
-            values.add(candidate)
-    return values
+        append_alias(values, candidate)
+    return tuple(values)
 
 
-def hotword_in(text, variants):
+def profile_for(cfg, hotword):
+    """Return a profile only when it belongs to the configured wake phrase."""
+    phrase = normalized(hotword)
+    profiles = cfg.get("voiceProfiles", {})
+    profile = profiles.get(phrase) if isinstance(profiles, dict) else None
+    if isinstance(profile, dict):
+        return profile
+
+    # Keep profiles produced by the first trainer release working, but never
+    # reuse its aliases after the user chooses a different wake phrase.
+    trained_hotword = normalized(str(cfg.get("trainedHotword", hotword)))
+    if ("hotwordAliases" in cfg or "inputGain" in cfg) and \
+            (not trained_hotword or trained_hotword == phrase):
+        return {
+            "aliases": cfg.get("hotwordAliases", []),
+            "inputGain": cfg.get("inputGain", 1.0),
+        }
+    return {}
+
+
+def decoder_aliases(hotword, trained_aliases=()):
+    """Aliases safe to offer to Vosk's constrained wake decoder.
+
+    The canonical phrase stays out of this grammar: an out-of-vocabulary name
+    such as Revvy is otherwise reduced to a too-broad partial phrase.  It is
+    still checked by the unrestricted fallback matcher.  Calibrated aliases
+    originate in Vosk transcripts and are therefore decoder vocabulary words.
+    """
+    canonical = normalized(hotword) or "hey revvy"
+    values = []
+    name = canonical[4:] if canonical.startswith("hey ") else canonical
+    if name in {"revvy", "revy"}:
+        for candidate in DEFAULT_REVVY_ALIASES:
+            append_alias(values, candidate)
+    for candidate in trained_aliases:
+        candidate = normalized(str(candidate))
+        if candidate != canonical:
+            append_alias(values, candidate)
+    return tuple(values)
+
+
+def sensitivity_score(value):
+    return SENSITIVITY_SCORES.get(str(value), SENSITIVITY_SCORES["1e-30"])
+
+
+def best_hotword_match(text, variants, threshold="1e-30"):
+    """Return ``(alias, score)`` for the best bounded wake-phrase match."""
     phrase = normalized(text)
-    return any(variant and variant in phrase for variant in variants)
+    if not phrase:
+        return "", 0.0
+    padded = " " + phrase + " "
+    for variant in variants:
+        if variant and (phrase == variant or (" " + variant + " ") in padded):
+            return variant, 1.0
+
+    required = sensitivity_score(threshold)
+    words = phrase.split()
+    best_alias, best_score = "", 0.0
+    for variant in variants:
+        count = len(variant.split())
+        # Compare only phrase-shaped windows.  Comparing whole utterances made
+        # a long command spuriously resemble a short wake phrase.
+        for width in range(max(1, count - 1), min(len(words), count + 1) + 1):
+            for start in range(0, len(words) - width + 1):
+                score = SequenceMatcher(None, " ".join(words[start:start + width]),
+                                        variant).ratio()
+                if score > best_score:
+                    best_alias, best_score = variant, score
+    return (best_alias, best_score) if best_score >= required else ("", best_score)
+
+
+def hotword_in(text, variants, threshold="1e-30"):
+    return bool(best_hotword_match(text, variants, threshold)[0])
+
+
+def strip_hotword_prefix(text, variants):
+    """Remove a decoded wake phrase before sending the remaining request."""
+    phrase = normalized(text)
+    for variant in sorted(variants, key=len, reverse=True):
+        if phrase == variant:
+            return ""
+        if phrase.startswith(variant + " "):
+            return phrase[len(variant):].strip()
+    return phrase
 
 
 def animate(name):
@@ -214,39 +318,77 @@ def make_stream(sounddevice, device, gain=1.0):
     return stream, audio
 
 
-def listen_for_hotword(sounddevice, recognizer, variants, device, gain):
-    stream, audio = make_stream(sounddevice, device, gain)
-    with stream:
-        while True:
-            data = audio.get()
-            if recognizer.AcceptWaveform(data):
-                text = json.loads(recognizer.Result()).get("text", "")
-            else:
-                text = json.loads(recognizer.PartialResult()).get("partial", "")
-            if hotword_in(text, variants):
-                return
+def recognizer_text(recognizer, data):
+    """Read a Vosk result without allowing a malformed response to stop audio."""
+    try:
+        if recognizer.AcceptWaveform(data):
+            return json.loads(recognizer.Result()).get("text", "")
+        return json.loads(recognizer.PartialResult()).get("partial", "")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ""
 
 
-def capture_command(sounddevice, model, seconds, device, gain):
+def make_hotword_recognizer(KaldiRecognizer, model, grammar):
+    """Prefer calibrated in-vocabulary aliases over broad general STT."""
+    if grammar:
+        try:
+            # [unk] keeps unrelated speech from being forced into one of the
+            # aliases.  Grammar values came from Vosk transcripts or the
+            # known-vocabulary default phonetic variants above.
+            return KaldiRecognizer(model, RATE, json.dumps(list(grammar) + ["[unk]"]))
+        except Exception as error:
+            log("calibrated wake grammar unavailable; using general decoder: " + str(error))
+    return KaldiRecognizer(model, RATE)
+
+
+def listen_for_hotword(audio, recognizer, variants, threshold):
+    """Consume a shared stream until an activation and retain its audio chunk."""
+    while True:
+        data = audio.get()
+        text = recognizer_text(recognizer, data)
+        alias, score = best_hotword_match(text, variants, threshold)
+        if alias:
+            return data, alias, text, score
+
+
+def capture_command(model, seconds, audio, initial_data=b""):
+    """Decode a command from the already-open microphone stream.
+
+    ``initial_data`` is the chunk that triggered activation.  Keeping it and
+    retaining the same PortAudio stream prevents the beginning of a natural
+    "wake phrase, then command" utterance from being lost during a stream
+    close/reopen cycle.
+    """
     from vosk import KaldiRecognizer
     recognizer = KaldiRecognizer(model, RATE)
-    stream, audio = make_stream(sounddevice, device, gain)
     deadline = time.monotonic() + max(2, min(30, int(seconds)))
     pieces = []
-    with stream:
-        while time.monotonic() < deadline:
-            try:
-                data = audio.get(timeout=0.25)
-            except queue.Empty:
-                continue
-            if recognizer.AcceptWaveform(data):
-                text = json.loads(recognizer.Result()).get("text", "").strip()
-                if text:
-                    pieces.append(text)
+    if initial_data:
+        text = recognizer_text(recognizer, initial_data).strip()
+        if text:
+            pieces.append(text)
+    while time.monotonic() < deadline:
+        try:
+            data = audio.get(timeout=0.25)
+        except queue.Empty:
+            continue
+        if recognizer.AcceptWaveform(data):
+            text = json.loads(recognizer.Result()).get("text", "").strip()
+            if text:
+                pieces.append(text)
     final = json.loads(recognizer.FinalResult()).get("text", "").strip()
     if final:
         pieces.append(final)
     return " ".join(pieces).strip()
+
+
+def discard_queued_audio(audio):
+    """Do not interpret speech spoken during the cooldown as a new hotword."""
+    while True:
+        try:
+            audio.get_nowait()
+        except queue.Empty:
+            return
 
 
 def test_wav(path, model, variants):
@@ -282,8 +424,14 @@ def main():
     if len(sys.argv) == 2 and sys.argv[1] == "--prepare-microphone":
         return 0 if choose_microphone() else 1
     model = Model(MODEL)
-    variants = aliases(str(cfg.get("hotword", "Hey Revvy!")),
-                       cfg.get("hotwordAliases", []))
+    hotword = str(cfg.get("hotword", "Hey Revvy!"))
+    profile = profile_for(cfg, hotword)
+    trained_aliases = profile.get("aliases", cfg.get("hotwordAliases", []))
+    if not isinstance(trained_aliases, (list, tuple)):
+        trained_aliases = []
+    variants = aliases(hotword, trained_aliases)
+    grammar = decoder_aliases(hotword, trained_aliases)
+    threshold = str(cfg.get("keywordThreshold", "1e-30"))
     if len(sys.argv) == 3 and sys.argv[1] == "--test-wav":
         return test_wav(sys.argv[2], model, variants)
     if not cfg.get("enabled", False):
@@ -293,9 +441,13 @@ def main():
         # Do not terminate: audio hardware can appear after a late session
         # startup or USB hotplug. The retry loop below keeps the service alive.
         log("microphone setup will be retried until an input becomes available")
-    log("listening for hotword: " + str(cfg.get("hotword", "Hey Revvy!")))
+    log("listening for hotword: " + hotword)
+    if grammar:
+        log("using %d calibrated wake alias(es); sensitivity %s" %
+            (len(grammar), threshold))
     try:
-        gain = max(1.0, min(3.0, float(cfg.get("inputGain", 1.0))))
+        gain = max(1.0, min(3.0, float(profile.get("inputGain",
+                                                    cfg.get("inputGain", 1.0)))))
     except (TypeError, ValueError):
         gain = 1.0
     if gain > 1.001:
@@ -309,17 +461,29 @@ def main():
             device = pulse_capture_device(sounddevice)
             if device is None:
                 raise RuntimeError("no Pulse/PipeWire capture device is available")
-            recognizer = KaldiRecognizer(model, RATE)
-            listen_for_hotword(sounddevice, recognizer, variants, device, gain)
-            log("hotword detected; opening command window")
-            animate("Processing")
-            prompt = capture_command(sounddevice, model, cfg.get("commandSeconds", 8), device, gain)
-            if prompt and dispatch(prompt):
-                log("recognized a command; dispatched it to Revvy")
-            else:
-                log("no command recognized; returning to idle")
-                animate("Idle")
-            time.sleep(max(0, min(60, int(cfg.get("cooldownSeconds", 2)))))
+            # Keep one stream alive for the entire service lifetime.  Apart
+            # from preserving the command audio after activation, this avoids
+            # repeated ALSA/Pulse reconnects that previously produced polling
+            # errors on some PipeWire sessions.
+            stream, audio = make_stream(sounddevice, device, gain)
+            with stream:
+                while True:
+                    recognizer = make_hotword_recognizer(KaldiRecognizer, model, grammar)
+                    trigger_data, alias, heard, score = listen_for_hotword(
+                        audio, recognizer, variants, threshold)
+                    log("hotword detected as '%s' (score %.2f); opening command window" %
+                        (alias, score))
+                    animate("Processing")
+                    prompt = capture_command(model, cfg.get("commandSeconds", 8),
+                                             audio, trigger_data)
+                    prompt = strip_hotword_prefix(prompt, variants)
+                    if prompt and dispatch(prompt):
+                        log("recognized a command; dispatched it to Revvy")
+                    else:
+                        log("no command recognized; returning to idle")
+                        animate("Idle")
+                    time.sleep(max(0, min(60, int(cfg.get("cooldownSeconds", 2)))))
+                    discard_queued_audio(audio)
         except Exception as error:
             log("audio or recognition error: " + str(error))
             microphone = None

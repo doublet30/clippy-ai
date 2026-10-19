@@ -13,7 +13,7 @@ from difflib import SequenceMatcher
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
-    QApplication, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
+    QApplication, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox,
     QPushButton, QVBoxLayout, QWidget,
 )
 
@@ -28,35 +28,61 @@ LISTENER = os.path.join(ROOT, "bin", "revvy-ai-voice-listener")
 RATE = 16000
 MAX_SECONDS = 22
 
-# The first three passages deliberately exercise the wake phrase plus common
-# command structures. The last pangram adds broad phonetic coverage without
-# accidentally training a second wake phrase.
-PASSAGES = (
-    {
-        "title": "Wake phrase and weather",
-        "text": "Hey Revvy! What's the weather forecast for today?",
-        "anchors": ("what", "weather", "forecast", "today"),
-        "wake": True,
-    },
-    {
-        "title": "Wake phrase and launching",
-        "text": "Hey Revvy! Launch wordcraft!",
-        "anchors": ("launch", "wordcraft"),
-        "wake": True,
-    },
-    {
-        "title": "Wake phrase and a detailed request",
-        "text": "Hey Revvy! Attach the document demoReport.docx to a new email and send it to johndoe@gmail.com",
-        "anchors": ("attach", "document", "email", "send"),
-        "wake": True,
-    },
-    {
-        "title": "Phonetic coverage",
-        "text": "The quick brown fox jumps over the lazy dog.",
-        "anchors": (),
-        "wake": False,
-    },
-)
+WAKE_REPETITIONS = 3
+
+
+def display_hotword(value):
+    """Return the configured phrase in a form suitable for a spoken prompt."""
+    phrase = str(value or "").strip()
+    phrase = phrase.rstrip(".!? ")
+    return phrase or "Hey Revvy"
+
+
+def passages_for(hotword):
+    """Build a local calibration script for the user's *current* wake phrase.
+
+    Vosk's compact model may spell a custom name phonetically.  The dedicated
+    repetitions intentionally let the trainer collect that decoder rendering
+    before it evaluates the longer command examples.
+    """
+    phrase = display_hotword(hotword)
+    passages = []
+    for number in range(1, WAKE_REPETITIONS + 1):
+        passages.append({
+            "title": "Wake phrase calibration %d" % number,
+            "text": phrase,
+            "anchors": (),
+            "wake": True,
+            "wakeSample": True,
+        })
+    passages.extend((
+        {
+            "title": "Wake phrase and weather",
+            "text": "%s! What's the weather forecast for today?" % phrase,
+            "anchors": ("what", "weather", "forecast", "today"),
+            "wake": True,
+        },
+        {
+            "title": "Wake phrase and launching",
+            "text": "%s! Launch wordcraft!" % phrase,
+            "anchors": ("launch", "wordcraft"),
+            "wake": True,
+        },
+        {
+            "title": "Wake phrase and a detailed request",
+            "text": ("%s! Attach the document demoReport.docx to a new email "
+                     "and send it to johndoe@gmail.com") % phrase,
+            "anchors": ("attach", "document", "email", "send"),
+            "wake": True,
+        },
+        {
+            "title": "Phonetic coverage",
+            "text": "The quick brown fox jumps over the lazy dog.",
+            "anchors": (),
+            "wake": False,
+        },
+    ))
+    return tuple(passages)
 
 
 def normalized(value):
@@ -132,18 +158,23 @@ def wake_alias(transcript, passage):
     if not passage["wake"]:
         return ""
     words = normalized(transcript).split()
+    if passage.get("wakeSample"):
+        return " ".join(words[:5]) if words else ""
     positions = [words.index(anchor) for anchor in passage["anchors"] if anchor in words]
-    if not positions:
-        return ""
-    alias = " ".join(words[:min(positions)])
-    # Ignore single generic words and overly broad phrases.
-    return alias if 2 <= len(alias.split()) <= 4 else ""
+    if positions:
+        alias = " ".join(words[:min(positions)])
+    else:
+        # Command-anchor words are sometimes missed even when the wake phrase
+        # was decoded.  This recording was explicitly made for calibration, so
+        # retain a short prefix for review instead of silently losing it.
+        alias = " ".join(words[:min(5, len(words))])
+    return alias if 1 <= len(alias.split()) <= 5 else ""
 
 
 class TrainerWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Revvy AI Voice Trainer")
+        self.setWindowTitle("Revvy AI Voice Calibration")
         self.setMinimumSize(720, 460)
         self.index = 0
         self.samples = []
@@ -155,7 +186,10 @@ class TrainerWindow(QMainWindow):
         self.timer.setInterval(100)
         self.timer.timeout.connect(self.refresh_clock)
         self.config = read_config()
-        self.speech_enabled = bool(self.config.get("speechRecognition", {}).get("enabled", False))
+        speech = self.config.get("speechRecognition", {})
+        self.hotword = display_hotword(speech.get("hotword", "Hey Revvy!"))
+        self.passages = passages_for(self.hotword)
+        self.speech_enabled = bool(speech.get("enabled", False))
         self.listener_was_active = run_systemctl("is-active", "--quiet",
                                                  "revvy-ai-voice.service") == 0
 
@@ -186,14 +220,23 @@ class TrainerWindow(QMainWindow):
             "border-radius: 12px; background: palette(alternate-base);"
         )
         self.instructions = QLabel(
-            "Revvy’s live listener is suspended while training. Speak normally, at a "
+            "Revvy’s live listener is suspended while calibration runs. Speak normally, at a "
             "comfortable volume, then click Finish recording. Raw audio is analyzed "
-            "locally and discarded; only calibration results are saved."
+            "locally and discarded; only local decoder aliases and level calibration are saved."
         )
         self.instructions.setWordWrap(True)
         self.status = QLabel()
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color: palette(mid);")
+        self.alias_label = QLabel("Revvy heard the wake phrase as:")
+        self.alias = QLineEdit()
+        self.alias.setToolTip(
+            "This is the local speech decoder's spelling of the phrase you just read. "
+            "Keeping that spelling lets Revvy recognize your pronunciation even when a "
+            "custom name is not in its built-in vocabulary."
+        )
+        self.alias_label.hide()
+        self.alias.hide()
         controls = QHBoxLayout()
         self.record = QPushButton("Start recording")
         self.finish = QPushButton("Finish recording")
@@ -212,16 +255,23 @@ class TrainerWindow(QMainWindow):
         layout.addWidget(self.passage)
         layout.addWidget(self.instructions)
         layout.addWidget(self.status)
+        layout.addWidget(self.alias_label)
+        layout.addWidget(self.alias)
         layout.addStretch()
         layout.addLayout(controls)
         self.setCentralWidget(content)
 
     def show_passage(self):
-        passage = PASSAGES[self.index]
-        self.step.setText("Passage %d of %d" % (self.index + 1, len(PASSAGES)))
+        passage = self.passages[self.index]
+        self.step.setText("Passage %d of %d" % (self.index + 1, len(self.passages)))
         self.title.setText(passage["title"])
         self.passage.setText("“%s”" % passage["text"])
         self.status.setText("Ready to record.")
+        self.alias.clear()
+        self.alias_label.setVisible(bool(passage["wake"]))
+        self.alias.setVisible(bool(passage["wake"]))
+        if passage["wake"]:
+            self.alias.setPlaceholderText("Record the phrase to see its local decoder alias")
         self.record.setEnabled(True)
         self.finish.setEnabled(False)
         self.next.setEnabled(False)
@@ -282,7 +332,7 @@ class TrainerWindow(QMainWindow):
         if len(data) < RATE * 2 * 2:
             self.status.setText("That sample was too short. Please record at least two seconds.")
             return
-        passage = PASSAGES[self.index]
+        passage = self.passages[self.index]
         transcript = transcribe(self.model, data)
         score = similarity(passage["text"], transcript)
         rms, peak = pcm_metrics(data)
@@ -293,13 +343,19 @@ class TrainerWindow(QMainWindow):
             "rms": round(rms, 4),
             "peak": round(peak, 4),
             "hotwordAlias": wake_alias(transcript, passage),
+            "wakeSample": bool(passage.get("wakeSample")),
         }
         quality = "Good" if score >= 0.45 else "Needs another try"
         level = "quiet" if rms < 0.025 else ("loud" if peak > 0.98 else "good")
+        if passage["wake"]:
+            self.alias.setText(self.current["hotwordAlias"])
+            alias_note = ("Revvy will use the decoder spelling above as a local wake alias. "
+                          "That is expected for a custom name or accent.")
+        else:
+            alias_note = "You can retry the passage or use this recording."
         self.status.setText(
-            "%s match (%d%%); input level: %s. Recognized: “%s”\n"
-            "You can retry the passage or use this recording." %
-            (quality, round(score * 100), level, transcript or "nothing")
+            "%s match (%d%%); input level: %s. Recognized: “%s”\n%s" %
+            (quality, round(score * 100), level, transcript or "nothing", alias_note)
         )
         # A non-empty, audible sample is a successful read. Recognition score
         # is shown as coaching rather than becoming a dead-end for accents or
@@ -307,9 +363,22 @@ class TrainerWindow(QMainWindow):
         self.next.setEnabled(bool(transcript) and rms >= 0.01)
 
     def advance(self):
-        self.samples.append(self.current)
+        if self.current is None:
+            return
+        passage = self.passages[self.index]
+        if passage["wake"]:
+            alias = normalized(self.alias.text())
+            if not alias:
+                QMessageBox.warning(
+                    self, "Wake phrase not heard",
+                    "Revvy needs a non-empty local decoder alias for this wake phrase. "
+                    "Please retry this short recording."
+                )
+                return
+            self.current["hotwordAlias"] = alias
+        self.samples.append(dict(self.current))
         self.index += 1
-        if self.index < len(PASSAGES):
+        if self.index < len(self.passages):
             self.show_passage()
             return
         self.finish_training()
@@ -320,39 +389,61 @@ class TrainerWindow(QMainWindow):
             alias = normalized(sample.get("hotwordAlias", ""))
             if alias and alias not in aliases:
                 aliases.append(alias)
-        existing = self.config.get("speechRecognition", {}).get("hotwordAliases", [])
+        # Use the newest on-disk config so a settings save during calibration
+        # cannot be overwritten with an old in-memory copy.  Profiles are
+        # keyed by phrase so aliases learned for a prior hotword are never
+        # reused accidentally after the user changes it.
+        current_config = read_config()
+        speech = current_config.get("speechRecognition", {})
+        profile_key = normalized(self.hotword)
+        profiles = speech.get("voiceProfiles", {})
+        profiles = dict(profiles) if isinstance(profiles, dict) else {}
+        existing_profile = profiles.get(profile_key, {})
+        existing = existing_profile.get("aliases", []) if isinstance(existing_profile, dict) else []
         aliases = list(dict.fromkeys(
             [normalized(alias) for alias in existing + aliases if normalized(alias)]
-        ))[:12]
+        ))[:16]
         levels = sorted(sample["rms"] for sample in self.samples if sample["rms"] > 0.003)
         median = levels[len(levels) // 2] if levels else 0.10
         # Only raise quiet input. Do not lower a working microphone or amplify
         # it beyond a modest, clipped-safe 3× corrective gain.
         gain = round(max(1.0, min(3.0, 0.12 / max(median, 0.01))), 2)
-        speech = self.config.get("speechRecognition", {})
-        speech["hotwordAliases"] = aliases
-        speech["inputGain"] = gain
-        speech["voiceProfile"] = {
-            "version": 1,
+        profile = {
+            "version": 2,
             "trainedAt": datetime.now(timezone.utc).isoformat(),
+            "hotword": self.hotword,
+            "aliases": aliases,
+            "inputGain": gain,
             "samples": self.samples,
             "averageSimilarity": round(sum(item["similarity"] for item in self.samples) /
                                        len(self.samples), 3),
             "rawAudioStored": False,
         }
-        self.config["speechRecognition"] = speech
-        save_config(self.config)
+        profiles[profile_key] = profile
+        speech["voiceProfiles"] = profiles
+        active_hotword = display_hotword(speech.get("hotword", self.hotword))
+        if normalized(active_hotword) == profile_key:
+            # Keep these compatibility fields for the listener installed by
+            # earlier Revvy packages, while newer versions select the keyed
+            # profile above.
+            speech["hotwordAliases"] = aliases
+            speech["inputGain"] = gain
+            speech["trainedHotword"] = self.hotword
+            speech["voiceProfile"] = profile
+        current_config["speechRecognition"] = speech
+        self.config = current_config
+        save_config(current_config)
         self.resume_listener()
         QMessageBox.information(
-            self, "Voice training complete",
-            "Revvy saved your local voice profile. The listener has been restarted "
-            "with your calibrated wake-phrase aliases and microphone gain. "
-            "No raw recording was retained."
+            self, "Voice calibration complete",
+            "Revvy saved %d local wake-phrase alias(es) and a microphone level "
+            "calibration. The listener has restarted with them. No raw recording "
+            "was retained." % len(aliases)
         )
         self.close()
 
     def resume_listener(self):
-        if self.speech_enabled:
+        if bool(read_config().get("speechRecognition", {}).get("enabled", self.speech_enabled)):
             run_systemctl("start", "revvy-ai-voice.service")
 
     def closeEvent(self, event):

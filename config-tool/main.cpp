@@ -208,12 +208,16 @@ private:
         hotwordSensitivity->addItem("Balanced", "1e-30");
         hotwordSensitivity->addItem("Stricter", "1e-40");
         hotwordSensitivity->setToolTip("Balance between recognizing the hotword in noise and avoiding accidental activation.");
-        auto *trainer = new QPushButton("Open Voice Trainer…");
-        trainer->setToolTip("Read a few local passages to calibrate Revvy's microphone and wake phrase recognition.");
-        connect(trainer, &QPushButton::clicked, this, [] {
+        auto *trainer = new QPushButton("Open Voice Calibration…");
+        trainer->setToolTip("Save the current voice settings, then read a few local passages to calibrate Revvy's microphone and selected wake phrase recognition.");
+        connect(trainer, &QPushButton::clicked, this, [this] {
+            // The calibration tool reads config.json directly.  Persist the
+            // current form first so it always uses the hotword shown above.
+            if (!save())
+                return;
             if (!QProcess::startDetached(QStringLiteral("/usr/local/bin/revvy-ai-voice-trainer"))) {
-                QMessageBox::critical(nullptr, "Revvy AI Voice Trainer",
-                                      "The Voice Trainer could not be started.");
+                QMessageBox::critical(this, "Revvy AI Voice Calibration",
+                                      "The Voice Calibration tool could not be started.");
             }
         });
         f->addRow(hotwordEnabled);
@@ -221,7 +225,7 @@ private:
         f->addRow("Listen after hotword:", commandSeconds);
         f->addRow("Cooldown:", cooldownSeconds);
         f->addRow("Detection sensitivity:", hotwordSensitivity);
-        f->addRow("Voice profile:", trainer);
+        f->addRow("Voice calibration:", trainer);
         v->addLayout(f);
         auto *note = new QLabel("Speech recognition runs locally with Vosk. Audio is used only for hotword detection and the short command window, then the recognized text is sent to the running Revvy AI service.");
         note->setWordWrap(true);
@@ -334,8 +338,18 @@ private:
         hotwordSensitivity->setCurrentIndex(sensitivity < 0 ? 1 : sensitivity);
     }
 
-    void save() {
+    bool save() {
+        // Voice Calibration can update speechRecognition while this window is
+        // open.  Start from the newest valid on-disk document so its profile
+        // and measurement fields survive a later settings save.
         QJsonObject o = root;
+        QFile currentConfig(path);
+        if (currentConfig.open(QIODevice::ReadOnly)) {
+            QJsonParseError parseError;
+            const QJsonDocument current = QJsonDocument::fromJson(currentConfig.readAll(), &parseError);
+            if (parseError.error == QJsonParseError::NoError && current.isObject())
+                o = current.object();
+        }
         o["provider"] = active->currentData().toString();
         QJsonObject provs = o["providers"].toObject();
         for (auto &pg : pages) {
@@ -386,10 +400,10 @@ private:
         QDir().mkpath(QFileInfo(path).absolutePath());
         QSaveFile out(path);
         out.setDirectWriteFallback(false);
-        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) { QMessageBox::critical(this, "Save failed", out.errorString()); return; }
+        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) { QMessageBox::critical(this, "Save failed", out.errorString()); return false; }
         out.write(QJsonDocument(o).toJson(QJsonDocument::Indented));
         out.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-        if (!out.commit()) { QMessageBox::critical(this, "Save failed", out.errorString()); return; }
+        if (!out.commit()) { QMessageBox::critical(this, "Save failed", out.errorString()); return false; }
         root = o;
         // RevolutionUI's custom sessions do not consistently activate
         // graphical-session.target. Keep an XDG autostart fallback beside
@@ -400,14 +414,14 @@ private:
             QDir().mkpath(autostartDir);
             QSaveFile startup(autostartFile);
             if (startup.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-                startup.write("[Desktop Entry]\\n"
-                              "Type=Application\\n"
-                              "Name=Revvy AI Voice Recognition\\n"
-                              "Comment=Start the Revvy AI offline hotword listener\\n"
-                              "Exec=systemctl --user start revvy-ai-voice.service\\n"
-                              "Terminal=false\\n"
-                              "NoDisplay=true\\n"
-                              "X-GNOME-Autostart-enabled=true\\n");
+                startup.write("[Desktop Entry]\n"
+                              "Type=Application\n"
+                              "Name=Revvy AI Voice Recognition\n"
+                              "Comment=Start the Revvy AI offline hotword listener\n"
+                              "Exec=systemctl --user start revvy-ai-voice.service\n"
+                              "Terminal=false\n"
+                              "NoDisplay=true\n"
+                              "X-GNOME-Autostart-enabled=true\n");
                 startup.commit();
             }
         } else {
@@ -436,6 +450,7 @@ private:
         statusBar()->showMessage(unitResult == 0
             ? "Saved. Voice recognition settings are active immediately."
             : "Saved. Revvy picks up changes on its next start.", 6000);
+        return true;
     }
 
     // ---- network helpers ----
