@@ -11,6 +11,7 @@
   "greeting": true,
   "userName": "",
   "tts": { "enabled": true, "engine": "auto", "piper": { "speed": 1.0 }, "voice": "en-us", "rate": 170, "pitch": 60 },
+  "speechRecognition": { "enabled": false, "hotword": "Hey Revvy!", "commandSeconds": 8, "cooldownSeconds": 2, "keywordThreshold": "1e-30" },
   "providers": {
     "anthropic": { "apiKey": "", "model": "claude-sonnet-5-5" },
     "openai":    { "apiKey": "", "model": "gpt-4.1-mini" },

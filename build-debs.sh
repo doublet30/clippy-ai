@@ -116,8 +116,10 @@ cat > "$P/usr/local/bin/revvy-ai-config" <<SH
 exec $PREFIX/bin/revvy-ai-config "\$@"
 SH
 chmod 755 "$P/usr/local/bin/revvy-ai" "$P/usr/local/bin/revvy-ai-config"
+install -m755 scripts/revvy-ai-voice-listener "$P$PREFIX/bin/revvy-ai-voice-listener"
 install -d "$P/usr/lib/systemd/user"
 install -m644 packaging/systemd/revvy-ai.service "$P/usr/lib/systemd/user/revvy-ai.service"
+install -m644 packaging/systemd/revvy-ai-voice.service "$P/usr/lib/systemd/user/revvy-ai-voice.service"
 
 cat > "$P/usr/share/applications/revvy-ai.desktop" <<DESKTOP
 [Desktop Entry]
@@ -141,6 +143,17 @@ Exec=/usr/local/bin/revvy-ai-config
 Icon=revvy-ai
 Terminal=false
 Categories=Settings;Qt;
+DESKTOP
+cat > "$P/usr/share/applications/revvy-ai-voice-trainer.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Revvy AI Voice Trainer
+Comment=Train Revvy AI to recognize your voice (coming soon)
+Exec=/usr/local/bin/revvy-ai-config --voice-trainer
+Icon=revvy-ai
+Terminal=false
+Categories=Settings;Utility;Qt;
+Keywords=assistant;ai;voice;speech;training;
 DESKTOP
 cp tools/mascots/art/tux.svg "$P/usr/share/icons/hicolor/scalable/apps/revvy-ai.svg"
 
@@ -197,7 +210,7 @@ SHLIBS=$(
     rm -rf "$d"
 )
 control "$NAME" "$ARCH" utils \
-    "quickshell, qml6-module-qtquick, qml6-module-qtquick-shapes, qml6-module-qtmultimedia, $SHLIBS" \
+    "quickshell, qml6-module-qtquick, qml6-module-qtquick-shapes, qml6-module-qtmultimedia, pocketsphinx, pocketsphinx-en-us, alsa-utils, $SHLIBS" \
     "$NAME-themes-free (>= $VERSION), espeak-ng, xdg-utils" \
     "ollama, $NAME-themes-non-free (>= $VERSION)" \
     "Animated multi-backend AI desktop assistant (Quickshell/QML)

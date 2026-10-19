@@ -34,6 +34,7 @@ public:
         auto *tabs = new QTabWidget;
         tabs->addTab(buildBrainTab(), "AI backend");
         tabs->addTab(buildGeneralTab(), "General");
+        tabs->addTab(buildVoiceRecognitionTab(), "Voice Recognition");
         auto *bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Reset | QDialogButtonBox::Close);
         bb->button(QDialogButtonBox::Reset)->setText("Revert");
         connect(bb, &QDialogButtonBox::accepted, this, [] {});
@@ -74,6 +75,10 @@ private:
     QDoubleSpinBox *scale; QLineEdit *location, *userName;
     QComboBox *voice;
     QCheckBox *greeting, *hideChatBubble, *ttsOn; QSpinBox *rate, *pitch;
+    QCheckBox *hotwordEnabled;
+    QLineEdit *hotword;
+    QSpinBox *commandSeconds, *cooldownSeconds;
+    QComboBox *hotwordSensitivity;
     QNetworkAccessManager nam;
 
     QWidget *buildBrainTab() {
@@ -181,6 +186,49 @@ private:
         return w;
     }
 
+    QWidget *buildVoiceRecognitionTab() {
+        auto *w = new QWidget;
+        auto *v = new QVBoxLayout(w);
+        auto *f = new QFormLayout;
+        hotwordEnabled = new QCheckBox("Enable hotword detection");
+        hotwordEnabled->setToolTip("Run an offline background listener only while this option is enabled.");
+        hotword = new QLineEdit;
+        hotword->setPlaceholderText("Hey Revvy!");
+        hotword->setToolTip("The phrase that activates a short voice-command listening window.");
+        commandSeconds = new QSpinBox;
+        commandSeconds->setRange(2, 30);
+        commandSeconds->setSuffix(" seconds");
+        commandSeconds->setToolTip("How long Revvy listens for your request after hearing the hotword.");
+        cooldownSeconds = new QSpinBox;
+        cooldownSeconds->setRange(0, 60);
+        cooldownSeconds->setSuffix(" seconds");
+        cooldownSeconds->setToolTip("Minimum pause after a request before hotword listening resumes.");
+        hotwordSensitivity = new QComboBox;
+        hotwordSensitivity->addItem("More sensitive", "1e-20");
+        hotwordSensitivity->addItem("Balanced", "1e-30");
+        hotwordSensitivity->addItem("Stricter", "1e-40");
+        hotwordSensitivity->setToolTip("Balance between recognizing the hotword in noise and avoiding accidental activation.");
+        auto *trainer = new QPushButton("Open Voice Trainer…");
+        trainer->setToolTip("Voice Trainer is reserved for a future Revvy AI release.");
+        connect(trainer, &QPushButton::clicked, this, [] {
+            QMessageBox::information(nullptr, "Revvy AI Voice Trainer",
+                "Voice Trainer is planned for a future release. It will let you improve recognition for your voice without changing the hotword service settings.");
+        });
+        f->addRow(hotwordEnabled);
+        f->addRow("Hotword:", hotword);
+        f->addRow("Listen after hotword:", commandSeconds);
+        f->addRow("Cooldown:", cooldownSeconds);
+        f->addRow("Detection sensitivity:", hotwordSensitivity);
+        f->addRow("Voice profile:", trainer);
+        v->addLayout(f);
+        auto *note = new QLabel("Speech recognition runs locally with PocketSphinx. Audio is used only for hotword detection and the short command window, then the recognized text is sent to the running Revvy AI service.");
+        note->setWordWrap(true);
+        note->setStyleSheet("color:gray");
+        v->addWidget(note);
+        v->addStretch();
+        return w;
+    }
+
     static QString str(const QJsonValue &v, const QString &d = {}) { return v.isString() ? v.toString() : d; }
 
     void populateVoiceChoices() {
@@ -275,6 +323,13 @@ private:
         selectVoice(tts);
         rate->setValue(tts["rate"].toInt(170));
         pitch->setValue(tts["pitch"].toInt(60));
+        const QJsonObject speech = root["speechRecognition"].toObject();
+        hotwordEnabled->setChecked(speech["enabled"].toBool(false));
+        hotword->setText(str(speech["hotword"], "Hey Revvy!"));
+        commandSeconds->setValue(speech["commandSeconds"].toInt(8));
+        cooldownSeconds->setValue(speech["cooldownSeconds"].toInt(2));
+        const int sensitivity = hotwordSensitivity->findData(str(speech["keywordThreshold"], "1e-30"));
+        hotwordSensitivity->setCurrentIndex(sensitivity < 0 ? 1 : sensitivity);
     }
 
     void save() {
@@ -318,6 +373,13 @@ private:
         }
         tts["rate"] = rate->value(); tts["pitch"] = pitch->value();
         o["tts"] = tts;
+        QJsonObject speech = o["speechRecognition"].toObject();
+        speech["enabled"] = hotwordEnabled->isChecked();
+        speech["hotword"] = hotword->text().trimmed().isEmpty() ? QStringLiteral("Hey Revvy!") : hotword->text().trimmed();
+        speech["commandSeconds"] = commandSeconds->value();
+        speech["cooldownSeconds"] = cooldownSeconds->value();
+        speech["keywordThreshold"] = hotwordSensitivity->currentData().toString();
+        o["speechRecognition"] = speech;
 
         QDir().mkpath(QFileInfo(path).absolutePath());
         QSaveFile out(path);
@@ -327,6 +389,14 @@ private:
         out.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
         if (!out.commit()) { QMessageBox::critical(this, "Save failed", out.errorString()); return; }
         root = o;
+        const int unitResult = QProcess::execute(QStringLiteral("systemctl"),
+            {QStringLiteral("--user"), hotwordEnabled->isChecked() ? QStringLiteral("enable") : QStringLiteral("disable"),
+             QStringLiteral("--now"), QStringLiteral("revvy-ai-voice.service")});
+        if (hotwordEnabled->isChecked() && unitResult == 0) {
+            // Restart applies a changed hotword or timing value immediately.
+            QProcess::execute(QStringLiteral("systemctl"),
+                              {QStringLiteral("--user"), QStringLiteral("restart"), QStringLiteral("revvy-ai-voice.service")});
+        }
         // The right-click menu keeps its own choices in state.json and they override config.json.
         // Saving here is an explicit choice, so drop those stale overrides.
         QString statePath = QFileInfo(path).absolutePath() + "/state.json";
@@ -339,7 +409,9 @@ private:
                 if (so.open(QIODevice::WriteOnly | QIODevice::Truncate)) { so.write(QJsonDocument(st).toJson()); so.commit(); }
             }
         }
-        statusBar()->showMessage("Saved. Clippy picks up changes on its next start (or right-click → Brain).", 6000);
+        statusBar()->showMessage(unitResult == 0
+            ? "Saved. Voice recognition settings are active immediately."
+            : "Saved. Revvy picks up changes on its next start.", 6000);
     }
 
     // ---- network helpers ----
@@ -429,6 +501,11 @@ int main(int argc, char **argv) {
     QApplication app(argc, argv);
     app.setApplicationName("revvy-ai-config");
     ConfigWindow w;
+    if (app.arguments().contains("--voice-trainer")) {
+        QMessageBox::information(nullptr, "Revvy AI Voice Trainer",
+            "Voice Trainer is planned for a future release. It will provide per-user recognition training without changing your hotword settings.");
+        return 0;
+    }
     if (app.arguments().contains("--reset-position")) { return w.resetPosition() ? 0 : 1; }   // headless recovery: clippy-ai-config --reset-position
     if (app.arguments().contains("--save-and-quit")) { w.saveNow(); return 0; }  // round-trip test / normalise file
     w.show();

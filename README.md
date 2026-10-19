@@ -24,6 +24,7 @@ command works via `tts.command`). Click Clippy to ask, drag to move, right-click
   the time, *find files* in your home folder, *open files* in their default app or a named one ("open my budget spreadsheet with libreoffice"),
   *launch programs* ("open firefox"), web search, and terminal commands (asks first).
 - **Voice**: natural Piper voice when installed - see [`docs/VOICES.md`](docs/VOICES.md).
+- **Voice recognition**: enable *Voice Recognition* in **Revvy AI Settings** to run the local-only hotword listener. Say **“Hey Revvy!”**, then speak a short request; the recognized text is delivered to the resident service exactly like `revvy-ai -p "…"`. The tab also controls the hotword, command-window duration, cooldown, and detection sensitivity. It uses PocketSphinx and does not upload microphone audio.
 - **Compositor / app control** (RevolutionWM) is designed in [`docs/COMPOSITOR_API.md`](docs/COMPOSITOR_API.md); `qml/Desktop.qml` already speaks the protocol
   and `tests/mock_wm.py` is a reference server.
 
