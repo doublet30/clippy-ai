@@ -5,6 +5,7 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
+Environment=QS_NO_RELOAD_POPUP=1
 ExecStart=/usr/local/bin/revvy-ai --service
 Restart=on-failure
 RestartSec=2
