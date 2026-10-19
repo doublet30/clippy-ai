@@ -1,15 +1,10 @@
 import QtQuick
-import "js/providers.js" as P
-
 // The whole desktop pet: character + bubble + brain, minus the OS window.
-// Host (shell.qml) provides the transparent window, drag handling and click mask.
+// Host (shell.qml) provides the transparent, fixed centred window and click mask.
 Item {
     id: root
 
     signal quit()
-    signal moveBy(real dx, real dy)
-    signal moveFinished()
-    signal resetPosition()
     readonly property bool bubbleOpen: bubble.isOpen
     // A response bubble is display-only and must stay at the normal widget
     // layer. Only a live text prompt needs a keyboard-focusable surface.
@@ -24,7 +19,6 @@ Item {
     readonly property rect bubbleRect: bubble.isOpen
         ? Qt.rect(bubble.x + (bubble.width - bubble.bodyW) / 2, bubble.y + bubble.height - bubble.bodyH - bubble.tailH, bubble.bodyW, bubble.bodyH + bubble.tailH)
         : Qt.rect(0, 0, 0, 0)
-    readonly property rect menuRect: menu.visible ? Qt.rect(menu.x, menu.y, menu.width, menu.height) : Qt.rect(0, 0, 0, 0)
 
     readonly property var thinkAnims: ["Thinking", "Processing", "Searching", "CheckingSomething", "Writing"]
     readonly property var talkAnims: ["Explain", "GestureLeft", "GestureRight", "GestureUp", "GestureDown"]
@@ -129,27 +123,14 @@ Item {
         }
     }
 
-    ContextMenu {
-        id: menu
-        z: 100      // above the agent's MouseArea, which would otherwise swallow clicks on overlapping items
-        brains: [{ id: "auto", label: "Auto", ready: true }].concat(Config.providerIds.map(id => ({
-            id: id, label: P.DEFAULTS[id].label, ready: P.resolve(id, Config.cfg.providers, Sys.env).ready })))
-        themes: Config.themeNames()
-        brain: Config.provider
-        theme: Config.theme
-        muted: Config.muted
-        pin: Config.pin
-        onChoose: (kind, v) => root.applyChoice(kind, v)
-    }
-
-    // Shared by the right-click menu and the IPC `select` call.
+    // Retained for controlled IPC integration; the on-screen widget has no
+    // context menu and exposes no pointer-accessible configuration actions.
     function applyChoice(kind, v) {
         if (kind === "provider") {
             Config.save("provider", v)
             _present("Now using " + brain.providerLabel + ".", false)
         } else if (kind === "theme") Config.save("theme", v)
         else if (kind === "pin") Config.save("pin", v)
-        else if (kind === "resetpos") root.resetPosition()
         else if (kind === "mute") { Config.save("muted", !Config.muted); if (Config.muted) Speech.stop() }
         else if (kind === "reset") { brain.reset(); _dismiss() }
         else if (kind === "animate") {
@@ -163,22 +144,10 @@ Item {
     MouseArea {
         x: visual.x; y: visual.y; width: visual.width; height: visual.height
         visible: visual.displayed
-        acceptedButtons: Qt.LeftButton | Qt.RightButton
-        property real px: 0
-        property real py: 0
-        property bool dragged: false
-        onPressed: m => { px = m.x; py = m.y; dragged = false }
-        onPositionChanged: m => {
-            if (!(m.buttons & Qt.LeftButton)) return
-            if (!dragged && Math.abs(m.x - px) + Math.abs(m.y - py) < 6) return
-            dragged = true
-            root.moveBy(m.x - px, m.y - py)
-        }
+        acceptedButtons: Qt.LeftButton
         onReleased: m => {
-            if (dragged) { root.moveFinished(); return }
-            if (m.button === Qt.RightButton) menu.openAt(visual.x + m.x, visual.y + m.y, root.width, root.height)
-            else if (bubble.mode === "input") root._dismiss()
-            else { menu.visible = false; root._openAsk() }
+            if (bubble.mode === "input") root._dismiss()
+            else root._openAsk()
         }
     }
 

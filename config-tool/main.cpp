@@ -50,20 +50,6 @@ public:
     }
 
     void saveNow() { save(); }
-    // Clear the saved widget position so Clippy re-centres itself (state.json is shared with the right-click menu).
-    bool resetPosition() {
-        QString statePath = QFileInfo(path).absolutePath() + "/state.json";
-        QFile sf(statePath);
-        QJsonObject st;
-        if (sf.open(QIODevice::ReadOnly)) { st = QJsonDocument::fromJson(sf.readAll()).object(); sf.close(); }
-        st.remove("pos");
-        QDir().mkpath(QFileInfo(statePath).absolutePath());
-        QSaveFile so(statePath);
-        if (!so.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
-        so.write(QJsonDocument(st).toJson());
-        return so.commit();
-    }
-
 private:
     QJsonObject root;
     QString path = QDir::homePath() + "/.config/revvy-ai/config.json";
@@ -165,10 +151,6 @@ private:
         populateVoiceChoices();
         rate = new QSpinBox; rate->setRange(80, 400);
         pitch = new QSpinBox; pitch->setRange(0, 99);
-        auto *resetPos = new QPushButton("Reset widget position (re-centre)");
-        connect(resetPos, &QPushButton::clicked, this, [this] {
-            statusBar()->showMessage(resetPosition() ? "Position reset - Clippy re-centres immediately (or on next start)." : "Could not write state.json", 6000);
-        });
         f->addRow("Character:", theme);
         f->addRow("Size multiplier:", scale);
         f->addRow("Stacking:", pin);
@@ -182,7 +164,6 @@ private:
         f->addRow("Voice:", voice);
         f->addRow("Speech rate (wpm):", rate);
         f->addRow("Pitch:", pitch);
-        f->addRow("Widget position:", resetPos);
         return w;
     }
 
@@ -435,8 +416,8 @@ private:
             QProcess::execute(QStringLiteral("systemctl"),
                               {QStringLiteral("--user"), QStringLiteral("restart"), QStringLiteral("revvy-ai-voice.service")});
         }
-        // The right-click menu keeps its own choices in state.json and they override config.json.
-        // Saving here is an explicit choice, so drop those stale overrides.
+        // Older releases kept transient widget choices in state.json. Saving
+        // here is an explicit choice, so drop those stale overrides.
         QString statePath = QFileInfo(path).absolutePath() + "/state.json";
         QFile sf(statePath);
         if (sf.open(QIODevice::ReadOnly)) {
@@ -543,7 +524,6 @@ int main(int argc, char **argv) {
     if (app.arguments().contains("--voice-trainer")) {
         return QProcess::startDetached(QStringLiteral("/usr/local/bin/revvy-ai-voice-trainer")) ? 0 : 1;
     }
-    if (app.arguments().contains("--reset-position")) { return w.resetPosition() ? 0 : 1; }   // headless recovery: clippy-ai-config --reset-position
     if (app.arguments().contains("--save-and-quit")) { w.saveNow(); return 0; }  // round-trip test / normalise file
     w.show();
     return app.exec();

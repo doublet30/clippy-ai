@@ -137,7 +137,7 @@ Item {
 
     function _step(n) {
         var p = provider
-        if (!p.ready) return _fail("I don't have an API key for " + p.label + ". Set " + (P.DEFAULTS[p.id].env[0] || "a key") + " or pick another brain (right-click me).")
+        if (!p.ready) return _fail("I don't have an API key for " + p.label + ". Set " + (P.DEFAULTS[p.id].env[0] || "a key") + " or choose another brain in Revvy AI Settings.")
         var ad = P.ADAPTERS[p.kind]
         var textMode = !!textTools[_key]
         var req

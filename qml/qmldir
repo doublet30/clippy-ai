@@ -11,5 +11,4 @@ Agent 1.0 Agent.qml
 VisualAgent 1.0 VisualAgent.qml
 CircleAiAnimation 1.0 appearances/CircleAiAnimation.qml
 Bubble 1.0 Bubble.qml
-ContextMenu 1.0 ContextMenu.qml
 Assistant 1.0 Assistant.qml

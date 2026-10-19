@@ -20,8 +20,6 @@ Singleton {
         var n = themeNames()
         return (n.length === 0 || n.indexOf(wantedTheme) >= 0) ? wantedTheme : n[0]
     }
-    // Saved widget position {x, y} (window margins); null = centred. Cleared by "Reset position".
-    readonly property var pos: state.pos || null
     // Stacking: "above" other windows (default) or "below" them (above the wallpaper only)
     property string pin: state.pin || cfg.pin || "above"
     property bool muted: state.muted !== undefined ? state.muted : (cfg.muted || false)
