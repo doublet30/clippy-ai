@@ -68,6 +68,23 @@ normalize() {
 normalized_hotword=$(printf '%s' "$hotword" | normalize | xargs)
 [[ -n "$normalized_hotword" ]] || normalized_hotword="hey revvy"
 
+log() {
+    printf 'revvy-ai-voice: %s\n' "$*" >&2
+}
+
+show_processing() {
+    # Circle AI fades in and enters its active ring state here.  Sprite themes
+    # use their matching Processing animation.  The prompt itself will later
+    # take over the normal request/response lifecycle.
+    "$revvy_bin" -a Processing >/dev/null 2>&1 || true
+}
+
+settle_visual() {
+    # A hotword with no recognized command still needs a visible completion.
+    # For Circle AI, Idle starts its standard 20-second fade-away timer.
+    "$revvy_bin" -a Idle >/dev/null 2>&1 || true
+}
+
 capture_and_dispatch() {
     local wav transcript
     wav=$(mktemp --suffix=.wav "${XDG_RUNTIME_DIR:-/tmp}/revvy-ai-command.XXXXXX")
@@ -75,20 +92,31 @@ capture_and_dispatch() {
     # arecord writes a WAV file PocketSphinx can decode directly. A missing
     # microphone is a cancelled command, not a service failure.
     if ! arecord -q -f S16_LE -r 16000 -c 1 -d "$command_seconds" "$wav"; then
+        log "microphone capture failed; returning to idle"
+        settle_visual
         return 0
     fi
     transcript=$(pocketsphinx_continuous -infile "$wav" -hmm "$acoustic_model" \
         -dict "$runtime_dictionary" -lm "$language_model" 2>/dev/null \
         | awk 'NF { result=$0 } END { print result }')
     transcript=$(printf '%s' "$transcript" | xargs)
-    [[ -n "$transcript" ]] || return 0
-    "$revvy_bin" -p "$transcript" || true
+    if [[ -z "$transcript" ]]; then
+        log "no command recognized; returning to idle"
+        settle_visual
+        return 0
+    fi
+    log "recognized a command; dispatching it to Revvy"
+    "$revvy_bin" -p "$transcript" >/dev/null 2>&1 || settle_visual
 }
 
+log "listening for hotword: $hotword"
 while :; do
     # A keyword-only decoder is cheap to leave running. Stop it before
     # recording the command so the microphone is never opened twice.
-    coproc HOTWORD { pocketsphinx_continuous -inmic yes -hmm "$acoustic_model" \
+    # PocketSphinx normally block-buffers stdout when it is piped.  Without
+    # stdbuf, a detected phrase can sit in that buffer and never reach read()
+    # until much later, making an otherwise healthy service look unresponsive.
+    coproc HOTWORD { stdbuf -oL pocketsphinx_continuous -inmic yes -hmm "$acoustic_model" \
         -dict "$runtime_dictionary" -keyphrase "$normalized_hotword" \
         -kws_threshold "$keyword_threshold" 2>/dev/null; }
     hotword_pid=$HOTWORD_PID
@@ -102,6 +130,10 @@ while :; do
     done
     kill "$hotword_pid" >/dev/null 2>&1 || true
     wait "$hotword_pid" 2>/dev/null || true
-    [[ "$detected" == true ]] && capture_and_dispatch
+    if [[ "$detected" == true ]]; then
+        log "hotword detected; opening command window"
+        show_processing
+        capture_and_dispatch
+    fi
     sleep "$cooldown_seconds"
 done
