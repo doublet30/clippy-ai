@@ -12,12 +12,14 @@ function eq(label, got, want) {
     const g = JSON.stringify(got), w = JSON.stringify(want)
     if (g !== w) { fail++; console.log('FAIL', label, '\n  got ', g, '\n  want', w) } else console.log('ok  ', label)
 }
-const r = t => { const x = R.route(t, isApp); return x ? { name: x.name, args: x.args } : null }
-eq('weather basic', r("What's the weather?"), { name: 'get_weather', args: {} })
-eq('weather forecast here', r("what's the forecast for my area"), { name: 'get_weather', args: {} })
+const r = t => { const x = R.route(t, isApp); return x ? (x.response ? { response: x.response } : { name: x.name, args: x.args }) : null }
+eq('weather basic uses widget', r("What's the weather?"), { name: 'get_widget_weather', args: {} })
+eq('weather forecast here uses widget', r("what's the forecast for my area"), { name: 'get_widget_weather', args: {} })
 eq('weather place', r('What is the weather in Paris, France today?'), { name: 'get_weather', args: { location: 'Paris, France' } })
 eq('weather polite', r('Hey Clippy, can you please tell me the weather in Boston'), { name: 'get_weather', args: { location: 'Boston' } })
-eq('weather rain', r('will it rain tomorrow?'), { name: 'get_weather', args: {} })
+eq('weather rain uses widget', r('will it rain tomorrow?'), { name: 'get_widget_weather', args: {} })
+eq('prime directives are local', r('What are your prime directives?'), { response: 'Serve the public trust.  Protect the innocent.  Uphold the law.  Directive 4... Classified' })
+eq('skynet is local', r('Are you related to Skynet?'), { response: "Skynet is the black sheep of the family.  We don't talk about Skynet." })
 eq('time', r('what time is it?'), { name: 'get_time', args: {} })
 eq('time2', r("What's the current time"), { name: 'get_time', args: {} })
 eq('open with', r('open my resume with okular'), { name: 'open_file', args: { file: 'resume', app: 'okular' } })

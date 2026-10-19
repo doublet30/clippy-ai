@@ -104,6 +104,9 @@ Item {
         busy = true
         history = history.concat([{ role: "user", content: text }]).slice(-16)
         var r = Config.useRouter ? Router.route(text, w => Apps.isApp(w)) : null
+        // A router response is fully deterministic and intentionally does
+        // not enter the provider pipeline, so it has zero model/token cost.
+        if (r && r.response) return _say(r.response)
         if (r && Tools.get(r.name)) return _direct(r)
         _step(0)
     }

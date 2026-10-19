@@ -55,6 +55,12 @@ Singleton {
     }
     function _plain(s) { return /^[A-Za-z0-9._+-]+$/.test(s) }
 
+    // The Weather widget is the single owner of normal local weather data.
+    // It refreshes independently and writes this small, atomic cache after a
+    // successful update, allowing Revvy to answer common weather questions
+    // with no network call and no LLM request.
+    readonly property string widgetWeatherCache: _home() + "/.cache/ttos/weather.json"
+
     // find <dir> files matching all words (and optional kind), newest first
     readonly property string findScript:
         'dir=$1; kind=$2; shift 2\n' +
@@ -115,6 +121,48 @@ Singleton {
                 } else {
                     done(new Date().toLocaleString(Qt.locale(), "dddd yyyy-MM-dd HH:mm:ss t") + " (local)")
                 }
+            }
+        })
+
+        register({
+            name: "get_widget_weather",
+            description: "Read the current local weather and forecast already displayed by the TTOS Weather widget.",
+            parameters: _obj({}),
+            anim: "CheckingSomething",
+            format: function (r) {
+                var j
+                try { j = JSON.parse(r) } catch (e) { return r }
+                if (!j.current || !j.location) return "The Weather widget does not have a forecast available yet."
+                var unit = String(j.units || "F").toUpperCase()
+                var degrees = "degrees " + (unit === "C" ? "Celsius" : "Fahrenheit")
+                var current = j.current
+                var s = "In " + j.location + ", it's " + Math.round(Number(current.temperature)) + " " + degrees
+                    + " and " + String(current.condition || "unknown conditions").toLowerCase() + "."
+                var f = j.forecast || []
+                if (f.length) {
+                    var today = f[0]
+                    s += " " + (today.day || "Today") + ": " + String(today.condition || "mixed conditions").toLowerCase()
+                        + ", high " + Math.round(Number(today.high)) + ", low " + Math.round(Number(today.low)) + "."
+                }
+                if (f.length > 1) {
+                    var next = f[1]
+                    s += " " + (next.day || "Tomorrow") + ": " + String(next.condition || "mixed conditions").toLowerCase()
+                        + ", high " + Math.round(Number(next.high)) + ", low " + Math.round(Number(next.low)) + "."
+                }
+                return s
+            },
+            run: function (a, done) {
+                Sys.run(["cat", widgetWeatherCache], (code, output) => {
+                    if (code !== 0 || !output.trim())
+                        return done("The Weather widget does not have a forecast available yet. It will be available after its next refresh.")
+                    try {
+                        var cache = JSON.parse(output)
+                        if (!cache.current || !cache.location) throw new Error("invalid weather cache")
+                        done(JSON.stringify(cache))
+                    } catch (e) {
+                        done("The Weather widget does not have a usable forecast available yet. It will be available after its next refresh.")
+                    }
+                })
             }
         })
 

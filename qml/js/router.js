@@ -45,12 +45,22 @@ function route(text, isApp) {
     if (!t || t.split(" ").length > 14) return null
     var m
 
+    // These are deliberate local personality responses.  Keeping them here
+    // means that a spoken or typed request never consumes an LLM request.
+    if (/\bprime directives?\b/i.test(t))
+        return { response: "Serve the public trust.  Protect the innocent.  Uphold the law.  Directive 4... Classified" }
+    if (/\bskynet\b/i.test(t))
+        return { response: "Skynet is the black sheep of the family.  We don't talk about Skynet." }
+
     // --- weather ---------------------------------------------------------
     if (/\b(?:weather|forecast|temperature|how (?:hot|cold|warm)|will it (?:rain|snow)|is it (?:raining|snowing|going to rain)|umbrella)\b/i.test(t)) {
         var loc = ""
         m = /\b(?:in|for|at|near|around)\s+([A-Za-z][A-Za-z .,'-]{1,40}?)(?:\s+(?:today|tonight|tomorrow|this\b.*|right now|now|please)|$)/i.exec(t)
         if (m && !NOT_A_PLACE.test(m[1].trim())) loc = m[1].trim()
-        return { name: "get_weather", args: loc ? { location: loc } : {} }
+        // The normal local forecast comes from the TTOS Weather widget's
+        // published cache.  A specifically named place remains a direct
+        // weather lookup, but still never requires an LLM round trip.
+        return { name: loc ? "get_weather" : "get_widget_weather", args: loc ? { location: loc } : {} }
     }
 
     // --- time / date -----------------------------------------------------

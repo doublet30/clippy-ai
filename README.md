@@ -20,7 +20,7 @@ command works via `tts.command`). Click Clippy to ask, drag to move, right-click
 - **Move it anywhere** by dragging; the spot is remembered. Right-click -> *Reset position* (or **Reset widget position** in `clippy-ai-config`,
   or `clippy-ai-config --reset-position` from a terminal) re-centres it. It can't be dragged off-screen.
 - **Above / below other windows**: right-click -> *Keep above windows* / *Keep below windows*. In "below" mode it rises just while you type a question.
-- **What it can do** (works well even with tiny local models, thanks to a built-in intent router): weather for your current location or any city,
+- **What it can do** (works well even with tiny local models, thanks to a built-in intent router): local weather and forecasts from the TTOS Weather widget cache (or a named city),
   the time, *find files* in your home folder, *open files* in their default app or a named one ("open my budget spreadsheet with libreoffice"),
   *launch programs* ("open firefox"), web search, and terminal commands (asks first).
 - **Voice**: natural Piper voice when installed - see [`docs/VOICES.md`](docs/VOICES.md).
