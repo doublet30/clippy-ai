@@ -61,7 +61,7 @@ private:
     QDoubleSpinBox *scale; QLineEdit *location, *userName;
     QComboBox *voice;
     QCheckBox *greeting, *hideChatBubble, *ttsOn; QSpinBox *rate, *pitch;
-    QCheckBox *hotwordEnabled;
+    QCheckBox *hotwordEnabled, *conversationMode;
     QLineEdit *hotword;
     QSpinBox *commandSeconds, *cooldownSeconds;
     QComboBox *hotwordSensitivity;
@@ -173,6 +173,9 @@ private:
         auto *f = new QFormLayout;
         hotwordEnabled = new QCheckBox("Enable hotword detection");
         hotwordEnabled->setToolTip("Run an offline background listener only while this option is enabled.");
+        conversationMode = new QCheckBox("Conversation mode");
+        conversationMode->setToolTip("Allow broader follow-up speech recognition after Revvy responds. "
+                                     "Leave this off to require your configured wake phrase for every request.");
         hotword = new QLineEdit;
         hotword->setPlaceholderText("Hey Revvy!");
         hotword->setToolTip("The phrase that activates a short voice-command listening window.");
@@ -202,6 +205,7 @@ private:
             }
         });
         f->addRow(hotwordEnabled);
+        f->addRow(conversationMode);
         f->addRow("Hotword:", hotword);
         f->addRow("Listen after hotword:", commandSeconds);
         f->addRow("Cooldown:", cooldownSeconds);
@@ -312,6 +316,10 @@ private:
         pitch->setValue(tts["pitch"].toInt(60));
         const QJsonObject speech = root["speechRecognition"].toObject();
         hotwordEnabled->setChecked(speech["enabled"].toBool(false));
+        // Privacy-preserving default: every request needs a deliberate wake
+        // phrase. Existing configurations without this key receive that
+        // safer behavior automatically.
+        conversationMode->setChecked(speech["conversationMode"].toBool(false));
         hotword->setText(str(speech["hotword"], "Hey Revvy!"));
         commandSeconds->setValue(speech["commandSeconds"].toInt(8));
         cooldownSeconds->setValue(speech["cooldownSeconds"].toInt(2));
@@ -372,6 +380,7 @@ private:
         o["tts"] = tts;
         QJsonObject speech = o["speechRecognition"].toObject();
         speech["enabled"] = hotwordEnabled->isChecked();
+        speech["conversationMode"] = conversationMode->isChecked();
         speech["hotword"] = hotword->text().trimmed().isEmpty() ? QStringLiteral("Hey Revvy!") : hotword->text().trimmed();
         speech["commandSeconds"] = commandSeconds->value();
         speech["cooldownSeconds"] = cooldownSeconds->value();

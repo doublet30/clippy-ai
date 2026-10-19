@@ -46,7 +46,11 @@ def normalized(value):
 
 def settings():
     values = {"enabled": False, "hotword": "Hey Revvy!", "commandSeconds": 8,
-              "cooldownSeconds": 2, "keywordThreshold": "1e-30"}
+              "cooldownSeconds": 2, "keywordThreshold": "1e-30",
+              # A desktop assistant must not treat surrounding conversation
+              # as input. Broader aliases are opt-in through Conversation
+              # Mode in Revvy AI Settings.
+              "conversationMode": False}
     try:
         with open(CONFIG, encoding="utf-8") as source:
             values.update(json.load(source).get("speechRecognition", {}))
@@ -61,10 +65,20 @@ def append_alias(values, candidate):
         values.append(candidate)
 
 
-def aliases(hotword, trained_aliases=()):
+def aliases(hotword, trained_aliases=(), strict=False):
     phrase = normalized(hotword) or "hey revvy"
     values = []
     append_alias(values, phrase)
+    if strict:
+        # Keep only concise, dedicated wake-training renderings. In
+        # particular, do not accept generic transcriptions such as "the
+        # remedy" or a long phrase heard while the user was speaking a
+        # command; either can occur in ordinary nearby conversation.
+        for candidate in trained_aliases:
+            candidate = normalized(str(candidate))
+            if candidate.startswith("hey ") and len(candidate.split()) <= 3:
+                append_alias(values, candidate)
+        return tuple(values)
     name = phrase[4:] if phrase.startswith("hey ") else phrase
     if name in {"revvy", "revy"}:
         # The small general-English model does not contain "Revvy". These
@@ -98,7 +112,7 @@ def profile_for(cfg, hotword):
     return {}
 
 
-def decoder_aliases(hotword, trained_aliases=()):
+def decoder_aliases(hotword, trained_aliases=(), strict=False):
     """Aliases safe to offer to Vosk's constrained wake decoder.
 
     The canonical phrase stays out of this grammar: an out-of-vocabulary name
@@ -108,6 +122,12 @@ def decoder_aliases(hotword, trained_aliases=()):
     """
     canonical = normalized(hotword) or "hey revvy"
     values = []
+    if strict:
+        for candidate in trained_aliases:
+            candidate = normalized(str(candidate))
+            if candidate.startswith("hey ") and len(candidate.split()) <= 3:
+                append_alias(values, candidate)
+        return tuple(values)
     name = canonical[4:] if canonical.startswith("hey ") else canonical
     if name in {"revvy", "revy"}:
         for candidate in DEFAULT_REVVY_ALIASES:
@@ -117,6 +137,23 @@ def decoder_aliases(hotword, trained_aliases=()):
         if candidate != canonical:
             append_alias(values, candidate)
     return tuple(values)
+
+
+def dedicated_wake_aliases(profile, fallback_aliases=()):
+    """Return aliases recorded during the trainer's wake-only passages.
+
+    Longer trainer passages also contain a decoded leading phrase.  They are
+    useful diagnostics, but are not wake words and must never activate
+    hotword-only mode.
+    """
+    samples = profile.get("samples", []) if isinstance(profile, dict) else []
+    values = []
+    if isinstance(samples, list):
+        for sample in samples:
+            if not isinstance(sample, dict) or not sample.get("wakeSample", False):
+                continue
+            append_alias(values, sample.get("hotwordAlias", ""))
+    return tuple(values) if values else tuple(fallback_aliases)
 
 
 def sensitivity_score(value):
@@ -429,8 +466,12 @@ def main():
     trained_aliases = profile.get("aliases", cfg.get("hotwordAliases", []))
     if not isinstance(trained_aliases, (list, tuple)):
         trained_aliases = []
-    variants = aliases(hotword, trained_aliases)
-    grammar = decoder_aliases(hotword, trained_aliases)
+    conversation_mode = bool(cfg.get("conversationMode", False))
+    strict_hotword = not conversation_mode
+    active_aliases = (dedicated_wake_aliases(profile, trained_aliases)
+                      if strict_hotword else trained_aliases)
+    variants = aliases(hotword, active_aliases, strict_hotword)
+    grammar = decoder_aliases(hotword, active_aliases, strict_hotword)
     threshold = str(cfg.get("keywordThreshold", "1e-30"))
     if len(sys.argv) == 3 and sys.argv[1] == "--test-wav":
         return test_wav(sys.argv[2], model, variants)
@@ -441,7 +482,8 @@ def main():
         # Do not terminate: audio hardware can appear after a late session
         # startup or USB hotplug. The retry loop below keeps the service alive.
         log("microphone setup will be retried until an input becomes available")
-    log("listening for hotword: " + hotword)
+    log("listening for hotword: " + hotword
+        + (" (conversation mode)" if conversation_mode else " (hotword-only mode)"))
     if grammar:
         log("using %d calibrated wake alias(es); sensitivity %s" %
             (len(grammar), threshold))
