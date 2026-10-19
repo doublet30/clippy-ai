@@ -71,3 +71,4 @@ Testing/
 /build/
 /dist/
 *.deb
+__pycache__/
