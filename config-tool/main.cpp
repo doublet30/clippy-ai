@@ -209,10 +209,12 @@ private:
         hotwordSensitivity->addItem("Stricter", "1e-40");
         hotwordSensitivity->setToolTip("Balance between recognizing the hotword in noise and avoiding accidental activation.");
         auto *trainer = new QPushButton("Open Voice Trainer…");
-        trainer->setToolTip("Voice Trainer is reserved for a future Revvy AI release.");
+        trainer->setToolTip("Read a few local passages to calibrate Revvy's microphone and wake phrase recognition.");
         connect(trainer, &QPushButton::clicked, this, [] {
-            QMessageBox::information(nullptr, "Revvy AI Voice Trainer",
-                "Voice Trainer is planned for a future release. It will let you improve recognition for your voice without changing the hotword service settings.");
+            if (!QProcess::startDetached(QStringLiteral("/usr/local/bin/revvy-ai-voice-trainer"))) {
+                QMessageBox::critical(nullptr, "Revvy AI Voice Trainer",
+                                      "The Voice Trainer could not be started.");
+            }
         });
         f->addRow(hotwordEnabled);
         f->addRow("Hotword:", hotword);
@@ -524,9 +526,7 @@ int main(int argc, char **argv) {
     app.setApplicationName("revvy-ai-config");
     ConfigWindow w;
     if (app.arguments().contains("--voice-trainer")) {
-        QMessageBox::information(nullptr, "Revvy AI Voice Trainer",
-            "Voice Trainer is planned for a future release. It will provide per-user recognition training without changing your hotword settings.");
-        return 0;
+        return QProcess::startDetached(QStringLiteral("/usr/local/bin/revvy-ai-voice-trainer")) ? 0 : 1;
     }
     if (app.arguments().contains("--reset-position")) { return w.resetPosition() ? 0 : 1; }   // headless recovery: clippy-ai-config --reset-position
     if (app.arguments().contains("--save-and-quit")) { w.saveNow(); return 0; }  // round-trip test / normalise file

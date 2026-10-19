@@ -118,9 +118,15 @@ cat > "$P/usr/local/bin/revvy-ai-config" <<SH
 #!/usr/bin/env bash
 exec $PREFIX/bin/revvy-ai-config "\$@"
 SH
-chmod 755 "$P/usr/local/bin/revvy-ai" "$P/usr/local/bin/revvy-ai-config"
+cat > "$P/usr/local/bin/revvy-ai-voice-trainer" <<SH
+#!/usr/bin/env bash
+exec $PREFIX/bin/revvy-ai-voice-trainer "\$@"
+SH
+chmod 755 "$P/usr/local/bin/revvy-ai" "$P/usr/local/bin/revvy-ai-config" "$P/usr/local/bin/revvy-ai-voice-trainer"
 install -m755 scripts/revvy-ai-voice-listener "$P$PREFIX/bin/revvy-ai-voice-listener"
 install -m755 scripts/revvy-ai-voice-listener.py "$P$PREFIX/bin/revvy-ai-voice-listener.py"
+install -m755 scripts/revvy-ai-voice-trainer "$P$PREFIX/bin/revvy-ai-voice-trainer"
+install -m755 scripts/revvy-ai-voice-trainer.py "$P$PREFIX/bin/revvy-ai-voice-trainer.py"
 # Bundle the small offline Vosk model and only the Python modules it requires.
 # This keeps speech recognition distributable instead of relying on a developer
 # virtual environment or transmitting microphone audio to a network service.
@@ -169,8 +175,8 @@ cat > "$P/usr/share/applications/revvy-ai-voice-trainer.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Revvy AI Voice Trainer
-Comment=Train Revvy AI to recognize your voice (coming soon)
-Exec=/usr/local/bin/revvy-ai-config --voice-trainer
+Comment=Calibrate Revvy AI's local voice recognition
+Exec=/usr/local/bin/revvy-ai-voice-trainer
 Icon=revvy-ai
 Terminal=false
 Categories=Settings;Utility;Qt;
@@ -231,7 +237,7 @@ SHLIBS=$(
     rm -rf "$d"
 )
 control "$NAME" "$ARCH" utils \
-    "quickshell, qml6-module-qtquick, qml6-module-qtquick-shapes, qml6-module-qtmultimedia, python3, libportaudio2, pulseaudio-utils, $SHLIBS" \
+    "quickshell, qml6-module-qtquick, qml6-module-qtquick-shapes, qml6-module-qtmultimedia, python3, python3-pyqt6, libportaudio2, pulseaudio-utils, $SHLIBS" \
     "$NAME-themes-free (>= $VERSION), espeak-ng, xdg-utils" \
     "ollama, $NAME-themes-non-free (>= $VERSION)" \
     "Animated multi-backend AI desktop assistant (Quickshell/QML)

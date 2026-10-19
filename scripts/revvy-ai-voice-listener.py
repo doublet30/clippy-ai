@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+from array import array
 
 ROOT = os.environ.get("REVVY_AI_ROOT", "/opt/ttos/revvy-ai")
 CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "revvy-ai", "config.json")
@@ -36,7 +37,7 @@ def settings():
     return values
 
 
-def aliases(hotword):
+def aliases(hotword, trained_aliases=()):
     phrase = normalized(hotword) or "hey revvy"
     values = {phrase}
     name = phrase[4:] if phrase.startswith("hey ") else phrase
@@ -45,6 +46,12 @@ def aliases(hotword):
         # cover its common phonetic transcriptions of the spoken wake phrase.
         values.update({"hey revy", "hey ready", "hey riley", "hey ruby",
                        "hey remy", "hey ravi", "the red meat", "the remedy"})
+    for candidate in trained_aliases:
+        candidate = normalized(str(candidate))
+        # A profile is local user data, but keep its aliases bounded so a
+        # malformed config cannot turn arbitrary speech into a wake phrase.
+        if 1 <= len(candidate.split()) <= 4:
+            values.add(candidate)
     return values
 
 
@@ -169,14 +176,29 @@ def pulse_capture_device(sounddevice):
     return None
 
 
-def make_stream(sounddevice, device):
+def scale_pcm(data, gain):
+    """Apply the trainer's small corrective gain to signed 16-bit PCM."""
+    if gain <= 1.001:
+        return data
+    samples = array("h")
+    samples.frombytes(data)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    for index, value in enumerate(samples):
+        samples[index] = max(-32768, min(32767, int(value * gain)))
+    if sys.byteorder != "little":
+        samples.byteswap()
+    return samples.tobytes()
+
+
+def make_stream(sounddevice, device, gain=1.0):
     audio = queue.Queue(maxsize=48)
 
     def callback(indata, _frames, _time, status):
         if status:
             return
         try:
-            audio.put_nowait(bytes(indata))
+            audio.put_nowait(scale_pcm(bytes(indata), gain))
         except queue.Full:
             try:
                 audio.get_nowait()
@@ -192,8 +214,8 @@ def make_stream(sounddevice, device):
     return stream, audio
 
 
-def listen_for_hotword(sounddevice, recognizer, variants, device):
-    stream, audio = make_stream(sounddevice, device)
+def listen_for_hotword(sounddevice, recognizer, variants, device, gain):
+    stream, audio = make_stream(sounddevice, device, gain)
     with stream:
         while True:
             data = audio.get()
@@ -205,10 +227,10 @@ def listen_for_hotword(sounddevice, recognizer, variants, device):
                 return
 
 
-def capture_command(sounddevice, model, seconds, device):
+def capture_command(sounddevice, model, seconds, device, gain):
     from vosk import KaldiRecognizer
     recognizer = KaldiRecognizer(model, RATE)
-    stream, audio = make_stream(sounddevice, device)
+    stream, audio = make_stream(sounddevice, device, gain)
     deadline = time.monotonic() + max(2, min(30, int(seconds)))
     pieces = []
     with stream:
@@ -257,18 +279,27 @@ def main():
         return 1
     SetLogLevel(-1)
     cfg = settings()
-    if not cfg.get("enabled", False):
-        return 0
+    if len(sys.argv) == 2 and sys.argv[1] == "--prepare-microphone":
+        return 0 if choose_microphone() else 1
     model = Model(MODEL)
-    variants = aliases(str(cfg.get("hotword", "Hey Revvy!")))
+    variants = aliases(str(cfg.get("hotword", "Hey Revvy!")),
+                       cfg.get("hotwordAliases", []))
     if len(sys.argv) == 3 and sys.argv[1] == "--test-wav":
         return test_wav(sys.argv[2], model, variants)
+    if not cfg.get("enabled", False):
+        return 0
     microphone = choose_microphone()
     if microphone is None:
         # Do not terminate: audio hardware can appear after a late session
         # startup or USB hotplug. The retry loop below keeps the service alive.
         log("microphone setup will be retried until an input becomes available")
     log("listening for hotword: " + str(cfg.get("hotword", "Hey Revvy!")))
+    try:
+        gain = max(1.0, min(3.0, float(cfg.get("inputGain", 1.0))))
+    except (TypeError, ValueError):
+        gain = 1.0
+    if gain > 1.001:
+        log("using trained microphone gain: %.2fx" % gain)
     while True:
         try:
             if microphone is None:
@@ -276,11 +307,13 @@ def main():
                 microphone = choose_microphone()
                 continue
             device = pulse_capture_device(sounddevice)
+            if device is None:
+                raise RuntimeError("no Pulse/PipeWire capture device is available")
             recognizer = KaldiRecognizer(model, RATE)
-            listen_for_hotword(sounddevice, recognizer, variants, device)
+            listen_for_hotword(sounddevice, recognizer, variants, device, gain)
             log("hotword detected; opening command window")
             animate("Processing")
-            prompt = capture_command(sounddevice, model, cfg.get("commandSeconds", 8), device)
+            prompt = capture_command(sounddevice, model, cfg.get("commandSeconds", 8), device, gain)
             if prompt and dispatch(prompt):
                 log("recognized a command; dispatched it to Revvy")
             else:
