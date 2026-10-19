@@ -29,6 +29,9 @@ NONFREE_THEMES=(bonzi clippy f1 genie genius links merlin peedy rocky rover)
 # package.  They still use an agent.json manifest so the existing Config and
 # CLI selection paths can discover them alongside sprite themes.
 CORE_THEMES=(circle-ai)
+VOSK_MODEL_NAME=vosk-model-small-en-us-0.15
+VOSK_MODEL_ARCHIVE=${VOSK_MODEL_ARCHIVE:-$HOME/.local/share/ttos/assistant/${VOSK_MODEL_NAME}.tar.gz}
+VOSK_MODEL_URL=https://alphacephei.com/vosk/models/${VOSK_MODEL_NAME}.zip
 
 BUILD=$ROOT/build
 DIST=$ROOT/dist
@@ -117,6 +120,24 @@ exec $PREFIX/bin/revvy-ai-config "\$@"
 SH
 chmod 755 "$P/usr/local/bin/revvy-ai" "$P/usr/local/bin/revvy-ai-config"
 install -m755 scripts/revvy-ai-voice-listener "$P$PREFIX/bin/revvy-ai-voice-listener"
+install -m755 scripts/revvy-ai-voice-listener.py "$P$PREFIX/bin/revvy-ai-voice-listener.py"
+# Bundle the small offline Vosk model and only the Python modules it requires.
+# This keeps speech recognition distributable instead of relying on a developer
+# virtual environment or transmitting microphone audio to a network service.
+install -d "$P$PREFIX/voice-python" "$P$PREFIX/voice-model"
+python3 -m pip install --disable-pip-version-check --no-compile --no-cache-dir \
+    --target "$P$PREFIX/voice-python" 'vosk==0.3.45' 'sounddevice==0.5.5'
+if [[ -f "$VOSK_MODEL_ARCHIVE" ]]; then
+    case "$VOSK_MODEL_ARCHIVE" in
+        *.zip) unzip -q "$VOSK_MODEL_ARCHIVE" -d "$P$PREFIX/voice-model" ;;
+        *) tar -xzf "$VOSK_MODEL_ARCHIVE" -C "$P$PREFIX/voice-model" ;;
+    esac
+else
+    model_zip="$BUILD/${VOSK_MODEL_NAME}.zip"
+    curl -fL --retry 3 "$VOSK_MODEL_URL" -o "$model_zip"
+    unzip -q "$model_zip" -d "$P$PREFIX/voice-model"
+fi
+[[ -d "$P$PREFIX/voice-model/$VOSK_MODEL_NAME" ]] || { echo "ERROR: Vosk model staging failed" >&2; exit 1; }
 install -d "$P/usr/lib/systemd/user"
 install -m644 packaging/systemd/revvy-ai.service "$P/usr/lib/systemd/user/revvy-ai.service"
 install -m644 packaging/systemd/revvy-ai-voice.service "$P/usr/lib/systemd/user/revvy-ai-voice.service"
@@ -210,7 +231,7 @@ SHLIBS=$(
     rm -rf "$d"
 )
 control "$NAME" "$ARCH" utils \
-    "quickshell, qml6-module-qtquick, qml6-module-qtquick-shapes, qml6-module-qtmultimedia, pocketsphinx, pocketsphinx-en-us, alsa-utils, $SHLIBS" \
+    "quickshell, qml6-module-qtquick, qml6-module-qtquick-shapes, qml6-module-qtmultimedia, python3, libportaudio2, $SHLIBS" \
     "$NAME-themes-free (>= $VERSION), espeak-ng, xdg-utils" \
     "ollama, $NAME-themes-non-free (>= $VERSION)" \
     "Animated multi-backend AI desktop assistant (Quickshell/QML)
