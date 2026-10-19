@@ -197,10 +197,11 @@ set -e
 if [ "$1" = configure ]; then
     command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q /usr/share/applications || true
     command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
-    # Make the resident IPC endpoint available automatically in graphical
-    # user sessions. It starts on the next login; users can also start it now
-    # with `systemctl --user start revvy-ai.service`.
-    command -v systemctl >/dev/null 2>&1 && systemctl --global enable revvy-ai.service >/dev/null 2>&1 || true
+    # Do not globally enable either resident unit.  Revvy is a widget, and
+    # its enabled state in ttos-widgetctl is the authoritative startup
+    # decision.  Older packages did enable it globally, bypassing a disabled
+    # widget after every login; remove those legacy global symlinks on upgrade.
+    command -v systemctl >/dev/null 2>&1 && systemctl --global disable revvy-ai.service revvy-ai-voice.service >/dev/null 2>&1 || true
 fi
 exit 0
 SH

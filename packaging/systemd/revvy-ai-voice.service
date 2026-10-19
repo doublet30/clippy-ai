@@ -1,7 +1,11 @@
 [Unit]
 Description=Revvy AI offline hotword listener
 After=pipewire.service pipewire-pulse.service wireplumber.service revvy-ai.service
-Wants=pipewire.service pipewire-pulse.service wireplumber.service revvy-ai.service
+Wants=pipewire.service pipewire-pulse.service wireplumber.service
+# Voice listening is subordinate to the visible Revvy widget.  It must never
+# revive the assistant after the user disables that widget.
+Requisite=revvy-ai.service
+PartOf=revvy-ai.service
 
 [Service]
 Type=simple
@@ -9,5 +13,5 @@ ExecStart=/opt/ttos/revvy-ai/bin/revvy-ai-voice-listener
 Restart=on-failure
 RestartSec=3
 
-[Install]
-WantedBy=default.target
+# The Revvy settings application may start this unit when hotword listening
+# is enabled, but it must not be globally enabled outside widget control.

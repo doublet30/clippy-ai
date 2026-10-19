@@ -9,5 +9,8 @@ ExecStart=/usr/local/bin/revvy-ai --service
 Restart=on-failure
 RestartSec=2
 
-[Install]
-WantedBy=graphical-session.target
+# This unit deliberately has no [Install] section.  The Revvy AI widget is
+# the owner of its desktop lifecycle: ttos-widgetctl starts this service only
+# when ttos.widget.assistant is enabled, and stops it when the widget is
+# disabled.  Enabling it globally bypasses that setting and makes Revvy
+# appear again on every login.
